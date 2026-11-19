@@ -37,3 +37,10 @@ desktop.ini
 *.db
 *.sqlite
 *.sqlite3
+
+# Local backup folders
+backup/
+backup_before_3_models/
+
+# Legacy model (kept locally)
+models/best_model.pkl

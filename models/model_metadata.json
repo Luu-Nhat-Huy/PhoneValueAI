@@ -1,6 +1,6 @@
 {
-    "model_name": "HistGradientBoostingRegressor",
-    "target": "resale_price",
+    "project_name": "PhoneValue AI",
+    "model_type": "Multiple Regression Models",
     "features": [
         "brand",
         "model",
@@ -30,48 +30,54 @@
         "charger_available",
         "market_demand_score"
     ],
-    "categorical_features": [
-        "brand",
-        "model",
-        "os_type",
-        "condition",
-        "city_tier",
-        "seller_type"
-    ],
-    "numeric_features": [
-        "release_year",
-        "ram_gb",
-        "storage_gb",
-        "screen_size_inches",
-        "battery_capacity",
-        "processor_score",
-        "camera_score",
-        "has_5g",
-        "original_price",
-        "purchase_year",
-        "age_months",
-        "usage_hours_per_day",
-        "battery_health",
-        "screen_cracked",
-        "body_damage",
-        "repair_history",
-        "water_damage",
-        "warranty_remaining_months",
-        "box_available",
-        "charger_available",
-        "market_demand_score"
-    ],
+    "target": "resale_price",
+    "dataset_rows": 1000000,
     "train_rows": 800000,
     "test_rows": 200000,
-    "total_rows": 1000000,
     "test_size": 0.2,
     "random_state": 42,
-    "training_time_seconds": 17.89,
-    "training_time_minutes": 0.3,
-    "metrics": {
-        "mae": 1801.6348892815254,
-        "rmse": 2297.586303477409,
-        "r2": 0.9810983573358374
+    "trained_at": "2026-11-19T09:01:09",
+    "selected_default_model": "Random Forest Regression",
+    "best_model": {
+        "model_name": "Random Forest Regression",
+        "model_file": "random_forest_regression.pkl",
+        "training_time_seconds": 2176.3570070266724,
+        "train_rows": 800000,
+        "test_rows": 200000,
+        "mae": 2755.621311246909,
+        "rmse": 3728.6318439699808,
+        "r2": 0.9502200002635623
     },
-    "trained_at": "2026-11-18T22:54:20"
+    "models": [
+        {
+            "model_name": "Linear Regression",
+            "model_file": "linear_regression.pkl",
+            "training_time_seconds": 3.5722243785858154,
+            "train_rows": 800000,
+            "test_rows": 200000,
+            "mae": 4794.8837890625,
+            "rmse": 6825.656012428402,
+            "r2": 0.8331813216209412
+        },
+        {
+            "model_name": "Decision Tree Regression",
+            "model_file": "decision_tree_regression.pkl",
+            "training_time_seconds": 365.66725897789,
+            "train_rows": 800000,
+            "test_rows": 200000,
+            "mae": 3199.6285706509675,
+            "rmse": 4325.115448035372,
+            "r2": 0.9330190519786365
+        },
+        {
+            "model_name": "Random Forest Regression",
+            "model_file": "random_forest_regression.pkl",
+            "training_time_seconds": 2176.3570070266724,
+            "train_rows": 800000,
+            "test_rows": 200000,
+            "mae": 2755.621311246909,
+            "rmse": 3728.6318439699808,
+            "r2": 0.9502200002635623
+        }
+    ]
 }

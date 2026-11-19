@@ -3,16 +3,27 @@ import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 
 # =====================================================
-# 1. CẤU HÌNH ĐƯỜNG DẪN
+# 1. CAU HINH DUONG DAN
 # =====================================================
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 APP_DIR = Path(__file__).resolve().parent
 PAGES_DIR = APP_DIR / "pages"
+MODEL_DIR = ROOT_DIR / "models"
+
+METADATA_PATH = MODEL_DIR / "model_metadata.json"
+
+DATA_PATH = (
+    ROOT_DIR
+    / "data"
+    / "raw"
+    / "used_phone_price_prediction_1M.csv.gz"
+)
 
 for path in (ROOT_DIR, APP_DIR):
     if str(path) not in sys.path:
@@ -20,7 +31,39 @@ for path in (ROOT_DIR, APP_DIR):
 
 
 # =====================================================
-# 2. CẤU HÌNH STREAMLIT
+# 2. CAU HINH DON VI GIA
+# =====================================================
+
+# Dataset luu gia theo don vi nghin dong.
+# 1 don vi dataset = 1.000 VND.
+PRICE_SCALE = 1000
+
+
+def format_number(value, decimals=2):
+    try:
+        if value is None or pd.isna(value):
+            return "Chưa có dữ liệu"
+
+        return f"{float(value):,.{decimals}f}"
+
+    except (TypeError, ValueError):
+        return "Chưa có dữ liệu"
+
+
+def format_vnd(value, decimals=0):
+    try:
+        if value is None or pd.isna(value):
+            return "N/A"
+
+        amount = float(value) * PRICE_SCALE
+        return f"{amount:,.{decimals}f} ₫"
+
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+# =====================================================
+# 3. CAU HINH STREAMLIT
 # =====================================================
 
 st.set_page_config(
@@ -32,7 +75,7 @@ st.set_page_config(
 
 
 # =====================================================
-# 3. IMPORT VÀ KHỞI TẠO DATABASE
+# 4. IMPORT VA KHOI TAO DATABASE
 # =====================================================
 
 from database import initialize_database, get_all_valuations
@@ -40,46 +83,103 @@ from database import initialize_database, get_all_valuations
 try:
     initialize_database()
     DATABASE_READY = True
+    DATABASE_ERROR = None
+
 except Exception as error:
     DATABASE_READY = False
     DATABASE_ERROR = str(error)
 
 
 # =====================================================
-# 4. ĐƯỜNG DẪN VÀ THÔNG TIN MÔ HÌNH
+# 5. DOC THONG TIN MO HINH
 # =====================================================
 
-MODEL_PATH = ROOT_DIR / "models" / "best_model.pkl"
-METADATA_PATH = ROOT_DIR / "models" / "model_metadata.json"
-DATA_PATH = (
-    ROOT_DIR
-    / "data"
-    / "raw"
-    / "used_phone_price_prediction_1M.csv.gz"
-)
+EXPECTED_MODELS = [
+    "Linear Regression",
+    "Decision Tree Regression",
+    "Random Forest Regression",
+]
 
 
 @st.cache_data
 def load_metadata():
+
     if not METADATA_PATH.exists():
         return None
 
     try:
-        with open(METADATA_PATH, "r", encoding="utf-8") as file:
-            return json.load(file)
+
+        with open(
+            METADATA_PATH,
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            metadata = json.load(file)
+
+        if not isinstance(metadata, dict):
+            return None
+
+        return metadata
+
     except (json.JSONDecodeError, OSError):
         return None
 
 
-def format_number(value, decimals=2):
-    try:
-        return f"{float(value):,.{decimals}f}"
-    except (TypeError, ValueError):
-        return "Chưa có dữ liệu"
+def get_model_information(metadata):
+    """
+    Lay thong tin 3 mo hinh tu metadata.
+    Khong su dung mo hinh cu.
+    """
+
+    if not metadata:
+        return [], None, None
+
+    models = metadata.get("models", [])
+
+    if not isinstance(models, list):
+        return [], None, None
+
+    valid_models = []
+
+    for item in models:
+
+        if not isinstance(item, dict):
+            continue
+
+        model_name = item.get("model_name")
+        model_file = item.get("model_file")
+
+        if not model_name or not model_file:
+            continue
+
+        if Path(model_file).name != model_file:
+            continue
+
+        model_path = MODEL_DIR / model_file
+
+        valid_models.append({
+            **item,
+            "file_exists": model_path.is_file(),
+        })
+
+    default_name = metadata.get("selected_default_model")
+
+    default_model = next(
+        (
+            item
+            for item in valid_models
+            if item["model_name"] == default_name
+            and item["file_exists"]
+        ),
+        None,
+    )
+
+    return valid_models, default_name, default_model
 
 
 # =====================================================
-# 5. CSS GIAO DIỆN
+# 6. CSS GIAO DIEN
 # =====================================================
 
 st.markdown(
@@ -104,7 +204,11 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0F1F3D 0%, #142D52 100%);
+        background: linear-gradient(
+            180deg,
+            #0F1F3D 0%,
+            #142D52 100%
+        );
         border-right: 1px solid #263F63;
     }
 
@@ -141,7 +245,12 @@ st.markdown(
     .hero {
         padding: 34px;
         border-radius: 22px;
-        background: linear-gradient(120deg, #102A56 0%, #155EAA 60%, #2563EB 100%);
+        background: linear-gradient(
+            120deg,
+            #102A56 0%,
+            #155EAA 60%,
+            #2563EB 100%
+        );
         color: white;
         margin-bottom: 26px;
         box-shadow: 0 12px 30px rgba(30, 64, 175, 0.15);
@@ -242,12 +351,27 @@ st.markdown(
 
 
 # =====================================================
-# 6. TRANG TỔNG QUAN
+# 7. TRANG TONG QUAN
 # =====================================================
 
 def dashboard():
 
     metadata = load_metadata()
+
+    models, default_name, default_model = get_model_information(
+        metadata
+    )
+
+    model_names = [
+        item["model_name"]
+        for item in models
+    ]
+
+    all_models_ready = (
+        len(model_names) == 3
+        and all(item["file_exists"] for item in models)
+        and set(model_names) == set(EXPECTED_MODELS)
+    )
 
     st.markdown(
         """
@@ -267,7 +391,7 @@ def dashboard():
     )
 
     # -------------------------------------------------
-    # TRẠNG THÁI HỆ THỐNG
+    # TRANG THAI HE THONG
     # -------------------------------------------------
 
     st.markdown(
@@ -280,32 +404,52 @@ def dashboard():
     with col1:
         st.metric(
             "Mô hình AI",
-            "Sẵn sàng" if MODEL_PATH.exists() else "Chưa có",
+            "3 mô hình sẵn sàng"
+            if all_models_ready
+            else "Chưa đầy đủ",
         )
 
     with col2:
         st.metric(
             "Cơ sở dữ liệu",
-            "Đã kết nối" if DATABASE_READY else "Lỗi kết nối",
+            "Đã kết nối"
+            if DATABASE_READY
+            else "Lỗi kết nối",
         )
 
     with col3:
         st.metric(
             "Dataset",
-            "Đã tìm thấy" if DATA_PATH.exists() else "Chưa tìm thấy",
+            "Đã tìm thấy"
+            if DATA_PATH.exists()
+            else "Chưa tìm thấy",
         )
 
     if not DATABASE_READY:
-        st.error(f"Không thể khởi tạo cơ sở dữ liệu: {DATABASE_ERROR}")
 
-    if not MODEL_PATH.exists():
-        st.warning(
-            "Chưa tìm thấy mô hình. Hãy chạy lệnh "
-            "`python src\\train.py` để huấn luyện."
+        st.error(
+            f"Không thể khởi tạo cơ sở dữ liệu: {DATABASE_ERROR}"
         )
 
+    if not all_models_ready:
+
+        st.warning(
+            "Danh sách mô hình chưa đầy đủ hoặc có file bị thiếu. "
+            "Hãy kiểm tra models/model_metadata.json và thư mục models."
+        )
+
+        for item in models:
+
+            status = (
+                "Đã có file"
+                if item["file_exists"]
+                else "Thiếu file"
+            )
+
+            st.write(f"- {item['model_name']}: {status}")
+
     # -------------------------------------------------
-    # THÔNG TIN MÔ HÌNH
+    # HIEU SUAT MO HINH
     # -------------------------------------------------
 
     st.markdown(
@@ -313,58 +457,134 @@ def dashboard():
         unsafe_allow_html=True,
     )
 
-    if metadata:
-        metrics = metadata.get("metrics", {})
+    if metadata and default_model:
+
+        st.success(
+            f"Mô hình mặc định đang sử dụng: **{default_name}**"
+        )
+
+        metrics = default_model
 
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             st.metric(
-                "Thuật toán",
-                metadata.get(
-                    "model_name",
-                    "HistGradientBoosting",
-                ),
+                "Thuật toán mặc định",
+                default_model["model_name"],
             )
 
         with col2:
             st.metric(
                 "R² Score",
-                format_number(metrics.get("r2")),
+                format_number(metrics.get("r2"), 4),
             )
 
         with col3:
             st.metric(
                 "MAE",
-                format_number(metrics.get("mae")),
+                format_vnd(metrics.get("mae")),
             )
 
         with col4:
             st.metric(
                 "RMSE",
-                format_number(metrics.get("rmse")),
+                format_vnd(metrics.get("rmse")),
+            )
+
+        st.markdown("#### So sánh cả 3 mô hình")
+
+        comparison_rows = []
+
+        for item in models:
+
+            comparison_rows.append({
+                "Mô hình": item["model_name"],
+                "MAE (VNĐ)": (
+                    float(item["mae"]) * PRICE_SCALE
+                    if item.get("mae") is not None
+                    else None
+                ),
+                "RMSE (VNĐ)": (
+                    float(item["rmse"]) * PRICE_SCALE
+                    if item.get("rmse") is not None
+                    else None
+                ),
+                "R² Score": item.get("r2"),
+                "Thời gian huấn luyện (giây)": item.get(
+                    "training_time_seconds"
+                ),
+                "Trạng thái": (
+                    "Sẵn sàng"
+                    if item["file_exists"]
+                    else "Thiếu file"
+                ),
+            })
+
+        st.dataframe(
+            comparison_rows,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "MAE (VNĐ)": st.column_config.NumberColumn(
+                    format="%,.0f ₫"
+                ),
+                "RMSE (VNĐ)": st.column_config.NumberColumn(
+                    format="%,.0f ₫"
+                ),
+                "R² Score": st.column_config.NumberColumn(
+                    format="%.4f"
+                ),
+                "Thời gian huấn luyện (giây)": (
+                    st.column_config.NumberColumn(
+                        format="%.2f"
+                    )
+                ),
+            },
+        )
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric(
+                "Tổng số mô hình",
+                len(models),
+            )
+
+        with col2:
+            st.metric(
+                "Dữ liệu huấn luyện",
+                f"{metadata.get('train_rows', 0):,}",
+            )
+
+        with col3:
+            st.metric(
+                "Dữ liệu kiểm tra",
+                f"{metadata.get('test_rows', 0):,}",
             )
 
         trained_at = metadata.get("trained_at")
 
         if trained_at:
-            st.caption(f"Thời điểm huấn luyện gần nhất: {trained_at}")
+            st.caption(
+                f"Thời điểm huấn luyện gần nhất: {trained_at}"
+            )
 
     else:
-        st.info(
-            "Chưa có thông tin đánh giá mô hình. "
-            "Hãy kiểm tra file models/model_metadata.json."
+
+        st.error(
+            "Không thể đọc thông tin mô hình mặc định. "
+            "Hãy kiểm tra metadata và file mô hình mới."
         )
 
     st.caption(
-        "MAE và RMSE sử dụng đơn vị giá trong dataset. "
-        "R² là hệ số đánh giá khả năng giải thích biến thiên của mô hình."
+        "MAE và RMSE đã được quy đổi sang VNĐ từ đơn vị nghìn đồng "
+        "trong dataset. R² không thay đổi khi quy đổi đơn vị."
     )
 
     st.divider()
 
     # -------------------------------------------------
-    # THỐNG KÊ LỊCH SỬ
+    # THONG KE LICH SU
     # -------------------------------------------------
 
     st.markdown(
@@ -373,80 +593,107 @@ def dashboard():
     )
 
     if DATABASE_READY:
+
         try:
+
             history = get_all_valuations()
 
             total = len(history)
 
             if total:
+
                 prices = [
                     float(item["predicted_price"])
                     for item in history
+                    if item.get("predicted_price") is not None
                 ]
 
-                average_price = sum(prices) / total
+            else:
+
+                prices = []
+
+            if prices:
+
+                average_price = sum(prices) / len(prices)
                 highest_price = max(prices)
 
             else:
+
                 average_price = 0
                 highest_price = 0
 
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                st.metric("Tổng lượt định giá", f"{total:,}")
+                st.metric(
+                    "Tổng lượt định giá",
+                    f"{total:,}",
+                )
 
             with col2:
                 st.metric(
                     "Giá dự đoán trung bình",
-                    format_number(average_price),
+                    format_vnd(average_price),
                 )
 
             with col3:
                 st.metric(
                     "Giá dự đoán cao nhất",
-                    format_number(highest_price),
+                    format_vnd(highest_price),
                 )
 
             if history:
+
                 st.markdown("#### Những lần định giá gần đây")
 
                 recent_rows = []
 
                 for item in history[:5]:
-                    recent_rows.append(
-                        {
-                            "Thời gian": item["created_at"],
-                            "Thương hiệu": item["brand"],
-                            "Model": item["model"],
-                            "Tình trạng": item["condition"],
-                            "Giá dự đoán": item["predicted_price"],
-                        }
-                    )
+
+                    raw_price = item.get("predicted_price")
+
+                    recent_rows.append({
+                        "Thời gian": item.get("created_at"),
+                        "Thương hiệu": item.get("brand"),
+                        "Model": item.get("model"),
+                        "Tình trạng": item.get("condition"),
+                        "Giá dự đoán (VNĐ)": (
+                            float(raw_price) * PRICE_SCALE
+                            if raw_price is not None
+                            else None
+                        ),
+                    })
 
                 st.dataframe(
                     recent_rows,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Giá dự đoán": st.column_config.NumberColumn(
-                            format="%.2f"
+                        "Giá dự đoán (VNĐ)": (
+                            st.column_config.NumberColumn(
+                                format="%,.0f ₫"
+                            )
                         )
                     },
                 )
+
             else:
+
                 st.info(
                     "Bạn chưa thực hiện lượt định giá nào. "
                     "Hãy mở trang Định giá điện thoại để bắt đầu."
                 )
 
         except Exception as error:
-            st.error(f"Không thể đọc lịch sử định giá: {error}")
+
+            st.error(
+                f"Không thể đọc lịch sử định giá: {error}"
+            )
 
     st.divider()
 
     # -------------------------------------------------
-    # CÁC CHỨC NĂNG
+    # CAC CHUC NANG
     # -------------------------------------------------
 
     st.markdown(
@@ -457,6 +704,7 @@ def dashboard():
     col1, col2 = st.columns(2)
 
     with col1:
+
         st.markdown(
             """
             <div class="feature-card">
@@ -488,6 +736,7 @@ def dashboard():
         )
 
     with col2:
+
         st.markdown(
             """
             <div class="feature-card">
@@ -521,7 +770,7 @@ def dashboard():
     st.divider()
 
     # -------------------------------------------------
-    # GIỚI THIỆU DỰ ÁN
+    # GIOI THIEU DU AN
     # -------------------------------------------------
 
     st.markdown(
@@ -534,6 +783,9 @@ def dashboard():
         **PhoneValue AI** là ứng dụng dự đoán giá điện thoại đã qua sử dụng
         bằng thuật toán Machine Learning.
 
+        Hệ thống sử dụng ba thuật toán:
+        Linear Regression, Decision Tree Regression và Random Forest Regression.
+
         Mô hình sử dụng `resale_price` làm biến mục tiêu và các thông tin
         về thương hiệu, cấu hình, tình trạng, thời gian sử dụng
         cùng yếu tố thị trường làm đặc trưng đầu vào.
@@ -541,21 +793,25 @@ def dashboard():
     )
 
     st.info(
-        "Lưu ý: Đơn vị giá được giữ nguyên theo dataset, chưa mặc định là VNĐ. "
+        "Đơn vị giá trên giao diện là VNĐ. "
+        "Dữ liệu gốc và mô hình vẫn sử dụng đơn vị nghìn đồng. "
         "Kết quả chỉ mang tính ước tính, không phải cam kết giá giao dịch."
     )
 
     st.markdown(
-        '<div class="footer-note">PhoneValue AI · Machine Learning Project</div>',
+        '<div class="footer-note">'
+        'PhoneValue AI · Machine Learning Project'
+        '</div>',
         unsafe_allow_html=True,
     )
 
 
 # =====================================================
-# 7. MENU ĐIỀU HƯỚNG
+# 8. MENU DIEU HUONG
 # =====================================================
 
 with st.sidebar:
+
     st.markdown(
         """
         <div style="padding: 8px 0 12px 0;">
@@ -573,7 +829,7 @@ with st.sidebar:
     st.divider()
 
     st.caption("MACHINE LEARNING PROJECT")
-    st.caption("Version 2.0")
+    st.caption("Version 3.0")
 
 
 pages = [
@@ -611,4 +867,3 @@ navigation = st.navigation(
 )
 
 navigation.run()
-

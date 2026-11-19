@@ -1,6 +1,12 @@
 ﻿
+import gc
 import json
+import os
+import shutil
+import tempfile
 import time
+import ctypes
+
 from datetime import datetime
 from pathlib import Path
 
@@ -20,12 +26,13 @@ from preprocessing import (
     ALL_FEATURES,
     CATEGORICAL_FEATURES,
     NUMERIC_FEATURES,
+    MODEL_CONFIGS,
     create_model_pipeline,
 )
 
 
 # =====================================================
-# 1. CẤU HÌNH ĐƯỜNG DẪN
+# 1. CAU HINH
 # =====================================================
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -38,85 +45,179 @@ DATA_PATH = (
 )
 
 MODEL_DIR = ROOT_DIR / "models"
-
-MODEL_PATH = MODEL_DIR / "best_model.pkl"
 METADATA_PATH = MODEL_DIR / "model_metadata.json"
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
 
+# Dung lai neu RAM kha dung thap.
+MIN_FREE_RAM_GB = 2.5
+
 
 # =====================================================
-# 2. HÀM KIỂM TRA DỮ LIỆU
+# 2. KIEM TRA RAM
 # =====================================================
 
-def validate_data(df):
+def get_free_ram_gb():
     """
-    Kiểm tra dữ liệu trước khi huấn luyện.
+    Lay dung luong RAM con trong tren Windows.
     """
+
+    class MEMORYSTATUSEX(ctypes.Structure):
+        _fields_ = [
+            ("dwLength", ctypes.c_ulong),
+            ("dwMemoryLoad", ctypes.c_ulong),
+            ("ullTotalPhys", ctypes.c_ulonglong),
+            ("ullAvailPhys", ctypes.c_ulonglong),
+            ("ullTotalPageFile", ctypes.c_ulonglong),
+            ("ullAvailPageFile", ctypes.c_ulonglong),
+            ("ullTotalVirtual", ctypes.c_ulonglong),
+            ("ullAvailVirtual", ctypes.c_ulonglong),
+            ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+        ]
+
+    try:
+        status = MEMORYSTATUSEX()
+        status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+
+        result = ctypes.windll.kernel32.GlobalMemoryStatusEx(
+            ctypes.byref(status)
+        )
+
+        if result:
+            return status.ullAvailPhys / (1024 ** 3)
+
+    except Exception:
+        pass
+
+    # Phuong an du phong neu khong lay duoc RAM bang Windows API.
+    try:
+        import psutil
+        return psutil.virtual_memory().available / (1024 ** 3)
+    except ImportError:
+        return None
+
+
+def check_memory(model_name):
+    free_ram = get_free_ram_gb()
+
+    print("\nKIEM TRA RAM:")
+    print(f"Mo hinh: {model_name}")
+
+    if free_ram is None:
+        print("Khong lay duoc thong tin RAM.")
+        print("Hay kiem tra RAM thu cong truoc khi tiep tuc.")
+        return
+
+    print(f"RAM kha dung: {free_ram:.2f} GB")
+
+    if free_ram < MIN_FREE_RAM_GB:
+        raise MemoryError(
+            f"RAM con trong {free_ram:.2f} GB, "
+            f"thap hon nguong {MIN_FREE_RAM_GB:.2f} GB. "
+            "Dung huan luyen de tranh thieu bo nho."
+        )
+
+
+# =====================================================
+# 3. DOC VA KIEM TRA DU LIEU
+# =====================================================
+
+def load_dataset():
+
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Khong tim thay dataset: {DATA_PATH}"
+        )
+
+    print("\nDANG DOC DATASET...")
+
+    dtype_config = {
+        column: "category"
+        for column in CATEGORICAL_FEATURES
+    }
+
+    dtype_config.update({
+        column: "float32"
+        for column in NUMERIC_FEATURES
+    })
+
+    dtype_config[TARGET] = "float32"
+
+    df = pd.read_csv(
+        DATA_PATH,
+        dtype=dtype_config,
+        low_memory=False,
+    )
+
+    print(f"So dong ban dau: {len(df):,}")
 
     required_columns = ALL_FEATURES + [TARGET]
 
-    # Kiểm tra các cột bắt buộc
     missing_columns = [
-        col
-        for col in required_columns
-        if col not in df.columns
+        column
+        for column in required_columns
+        if column not in df.columns
     ]
 
     if missing_columns:
         raise ValueError(
-            "Du lieu thieu cac cot: "
+            "Dataset thieu cot: "
             + ", ".join(missing_columns)
         )
 
-    # Kiểm tra dataset rỗng
+    # Chi giu cac cot can thiet.
+    df = df[required_columns]
+
+    # Loai bo target khong hop le.
+    target = pd.to_numeric(
+        df[TARGET],
+        errors="coerce",
+    )
+
+    valid_mask = (
+        target.notna()
+        & np.isfinite(target)
+        & (target >= 0)
+    )
+
+    df = df.loc[valid_mask].copy()
+
+    df[TARGET] = target.loc[valid_mask].astype("float32")
+
     if df.empty:
-        raise ValueError(
-            "Dataset khong co du lieu."
-        )
+        raise ValueError("Khong con du lieu hop le.")
 
-    # Kiểm tra giá trị thiếu ở biến mục tiêu
-    if df[TARGET].isna().any():
-        raise ValueError(
-            "Cot resale_price co gia tri thieu."
-        )
+    print(f"So dong hop le: {len(df):,}")
+    print(f"So dac trung: {len(ALL_FEATURES)}")
 
-    # Kiểm tra giá trị vô hạn ở biến mục tiêu
-    if not np.isfinite(df[TARGET]).all():
-        raise ValueError(
-            "Cot resale_price co gia tri khong hop le."
-        )
+    memory_mb = (
+        df.memory_usage(deep=True).sum()
+        / (1024 ** 2)
+    )
 
-    # Kiểm tra giá bán lại âm
-    if (df[TARGET] < 0).any():
-        raise ValueError(
-            "Cot resale_price co gia tri am."
-        )
+    print(f"Dung luong DataFrame: {memory_mb:.2f} MB")
 
-    print("Kiem tra du lieu thanh cong!")
+    return df
 
 
 # =====================================================
-# 3. HÀM TÍNH TOÁN CHỈ SỐ ĐÁNH GIÁ
+# 4. DANH GIA MO HINH
 # =====================================================
 
 def evaluate_model(y_test, predictions):
-    """
-    Tính các chỉ số MAE, RMSE và R2.
-    """
 
     mae = mean_absolute_error(
         y_test,
         predictions,
     )
 
-    mse = mean_squared_error(
-        y_test,
-        predictions,
+    rmse = np.sqrt(
+        mean_squared_error(
+            y_test,
+            predictions,
+        )
     )
-
-    rmse = np.sqrt(mse)
 
     r2 = r2_score(
         y_test,
@@ -131,67 +232,130 @@ def evaluate_model(y_test, predictions):
 
 
 # =====================================================
-# 4. HÀM LƯU METADATA
+# 5. HUAN LUYEN MOT MO HINH
 # =====================================================
 
-def save_metadata(
-    metrics,
-    train_rows,
-    test_rows,
-    training_time,
+def train_one_model(
+    model_name,
+    X_train,
+    X_test,
+    y_train,
+    y_test,
+    temp_model_dir,
 ):
-    """
-    Lưu thông tin mô hình và kết quả đánh giá.
-    """
 
-    metadata = {
-        "model_name": "HistGradientBoostingRegressor",
+    print("\n" + "=" * 70)
+    print(f"BAT DAU HUAN LUYEN: {model_name}")
+    print("=" * 70)
 
-        "target": TARGET,
+    check_memory(model_name)
 
+    pipeline = create_model_pipeline(model_name)
+
+    start_time = time.time()
+
+    print("\nDang fit mo hinh...")
+
+    pipeline.fit(
+        X_train,
+        y_train,
+    )
+
+    training_time = time.time() - start_time
+
+    print("Dang du doan tren tap test...")
+
+    predictions = pipeline.predict(X_test)
+
+    metrics = evaluate_model(
+        y_test,
+        predictions,
+    )
+
+    model_filename = MODEL_CONFIGS[model_name]["file"]
+
+    temp_model_path = temp_model_dir / model_filename
+
+    print("Dang luu mo hinh vao thu muc tam...")
+
+    joblib.dump(
+        pipeline,
+        temp_model_path,
+        compress=3,
+    )
+
+    result = {
+        "model_name": model_name,
+        "model_file": model_filename,
+        "training_time_seconds": float(training_time),
+        "train_rows": int(len(X_train)),
+        "test_rows": int(len(X_test)),
+        **metrics,
+    }
+
+    print("\nKET QUA:")
+    print(f"MAE : {metrics['mae']:,.2f}")
+    print(f"RMSE: {metrics['rmse']:,.2f}")
+    print(f"R2  : {metrics['r2']:.6f}")
+    print(f"Thoi gian: {training_time:.2f} giay")
+    print(f"File tam: {temp_model_path}")
+
+    # Giai phong pipeline va du lieu du doan.
+    del pipeline
+    del predictions
+
+    gc.collect()
+
+    return result
+
+
+# =====================================================
+# 6. LUU METADATA
+# =====================================================
+
+def create_metadata(results, train_rows, test_rows):
+
+    best_model = min(
+        results,
+        key=lambda item: item["mae"],
+    )
+
+    return {
+        "project_name": "PhoneValue AI",
+        "model_type": "Multiple Regression Models",
         "features": ALL_FEATURES,
-
-        "categorical_features": CATEGORICAL_FEATURES,
-
-        "numeric_features": NUMERIC_FEATURES,
-
+        "target": TARGET,
+        "dataset_rows": int(train_rows + test_rows),
         "train_rows": int(train_rows),
-
         "test_rows": int(test_rows),
-
-        "total_rows": int(train_rows + test_rows),
-
         "test_size": TEST_SIZE,
-
         "random_state": RANDOM_STATE,
-
-        "training_time_seconds": round(
-            training_time,
-            2,
-        ),
-
-        "training_time_minutes": round(
-            training_time / 60,
-            2,
-        ),
-
-        "metrics": {
-            "mae": metrics["mae"],
-            "rmse": metrics["rmse"],
-            "r2": metrics["r2"],
-        },
-
         "trained_at": datetime.now().isoformat(
             timespec="seconds"
         ),
+        "selected_default_model": best_model["model_name"],
+        "best_model": best_model,
+        "models": results,
     }
 
+
+# =====================================================
+# 7. CONG BO CAC MO HINH
+# =====================================================
+
+def publish_models(temp_model_dir, metadata):
+
+    print("\n" + "=" * 70)
+    print("DANG CONG BO CAC MO HINH...")
+    print("=" * 70)
+
+    temp_metadata = temp_model_dir / "model_metadata.json"
+
     with open(
-        METADATA_PATH,
+        temp_metadata,
         "w",
         encoding="utf-8",
     ) as file:
-
         json.dump(
             metadata,
             file,
@@ -199,221 +363,190 @@ def save_metadata(
             indent=4,
         )
 
-    print(
-        f"Da luu metadata: {METADATA_PATH}"
+    # Chi cong bo sau khi ca 3 mo hinh da duoc huan luyen.
+    for model_name, config in MODEL_CONFIGS.items():
+
+        filename = config["file"]
+
+        source = temp_model_dir / filename
+        destination = MODEL_DIR / filename
+
+        if not source.exists():
+            raise FileNotFoundError(
+                f"Khong tim thay mo hinh tam: {source}"
+            )
+
+        os.replace(
+            source,
+            destination,
+        )
+
+        print(f"Da cong bo: {destination}")
+
+    # Metadata luon duoc ghi cuoi cung.
+    os.replace(
+        temp_metadata,
+        METADATA_PATH,
     )
+
+    print(f"Da cap nhat metadata: {METADATA_PATH}")
 
 
 # =====================================================
-# 5. CHƯƠNG TRÌNH HUẤN LUYỆN
+# 8. CHUONG TRINH CHINH
 # =====================================================
 
 def main():
-
-    start_time = time.time()
-
-    print("=" * 65)
-    print("PHONEVALUE AI - HUAN LUYEN MO HINH")
-    print("=" * 65)
-
-    # -------------------------------------------------
-    # BƯỚC 1: KIỂM TRA FILE
-    # -------------------------------------------------
-
-    print("\n[1] Kiem tra duong dan...")
-
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(
-            f"Khong tim thay dataset: {DATA_PATH}"
-        )
 
     MODEL_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    print("Dataset da duoc tim thay!")
+    print("=" * 70)
+    print("PHONEVALUE AI - HUAN LUYEN 3 MO HINH")
+    print("DATASET MUC TIEU: 1.000.000 DONG")
+    print("=" * 70)
 
-    # -------------------------------------------------
-    # BƯỚC 2: ĐỌC DỮ LIỆU
-    # -------------------------------------------------
+    check_memory("Doc dataset")
 
-    print("\n[2] Dang doc dataset...")
+    df = load_dataset()
 
-    df = pd.read_csv(
-        DATA_PATH,
-        low_memory=False,
-    )
+    print("\nDANG CHIA TAP TRAIN/TEST...")
 
-    print(f"So dong: {len(df):,}")
-    print(f"So cot: {len(df.columns)}")
+    indices = np.arange(len(df))
 
-    # -------------------------------------------------
-    # BƯỚC 3: KIỂM TRA DỮ LIỆU
-    # -------------------------------------------------
-
-    print("\n[3] Kiem tra du lieu...")
-
-    validate_data(df)
-
-    # Chỉ sử dụng những đặc trưng đã xác định
-    X = df[ALL_FEATURES].copy()
-
-    # Biến mục tiêu
-    y = df[TARGET].copy()
-
-    # -------------------------------------------------
-    # BƯỚC 4: CHIA TRAIN VÀ TEST
-    # -------------------------------------------------
-
-    print("\n[4] Chia tap train va test...")
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
+    train_indices, test_indices = train_test_split(
+        indices,
         test_size=TEST_SIZE,
         random_state=RANDOM_STATE,
     )
 
-    print(f"Train: {len(X_train):,} dong")
-    print(f"Test : {len(X_test):,} dong")
+    print(f"Train: {len(train_indices):,} dong")
+    print(f"Test : {len(test_indices):,} dong")
 
-    # -------------------------------------------------
-    # BƯỚC 5: KHỞI TẠO PIPELINE
-    # -------------------------------------------------
+    # Tao cac tap du lieu dung mot lan.
+    X_train = df.iloc[train_indices][ALL_FEATURES]
+    X_test = df.iloc[test_indices][ALL_FEATURES]
 
-    print("\n[5] Khoi tao mo hinh...")
+    y_train = df[TARGET].iloc[train_indices]
+    y_test = df[TARGET].iloc[test_indices]
 
-    pipeline = create_model_pipeline()
+    # Giai phong DataFrame goc va chi so.
+    del df
+    del indices
+    del train_indices
+    del test_indices
 
-    print(
-        "Mo hinh: HistGradientBoostingRegressor"
+    gc.collect()
+
+    results = []
+
+    # Tao thu muc tam trong models.
+    temp_model_dir = Path(
+        tempfile.mkdtemp(
+            prefix="training_temp_",
+            dir=MODEL_DIR,
+        )
     )
 
-    print(
-        "Tien xu ly: OneHotEncoder + Numeric passthrough"
-    )
+    try:
 
-    # -------------------------------------------------
-    # BƯỚC 6: HUẤN LUYỆN
-    # -------------------------------------------------
+        # Huấn luyện lần lượt đúng 3 mô hình.
+        for model_name in MODEL_CONFIGS:
 
-    print("\n[6] Bat dau huan luyen...")
+            result = train_one_model(
+                model_name,
+                X_train,
+                X_test,
+                y_train,
+                y_test,
+                temp_model_dir,
+            )
 
-    print(
-        "Qua trinh co the mat mot khoang thoi gian."
-    )
+            results.append(result)
 
-    pipeline.fit(
-        X_train,
-        y_train,
-    )
+            gc.collect()
 
-    print("Huan luyen hoan tat!")
+        # Tao metadata sau khi ca 3 mo hinh thanh cong.
+        metadata = create_metadata(
+            results,
+            len(X_train),
+            len(X_test),
+        )
 
-    # -------------------------------------------------
-    # BƯỚC 7: DỰ ĐOÁN TRÊN TẬP TEST
-    # -------------------------------------------------
+        # Giai phong tap train/test truoc khi cong bo.
+        del X_train
+        del X_test
+        del y_train
+        del y_test
 
-    print("\n[7] Danh gia mo hinh...")
+        gc.collect()
 
-    predictions = pipeline.predict(
-        X_test,
-    )
+        publish_models(
+            temp_model_dir,
+            metadata,
+        )
 
-    # -------------------------------------------------
-    # BƯỚC 8: TÍNH CHỈ SỐ
-    # -------------------------------------------------
+        print("\n" + "=" * 75)
+        print("BANG SO SANH 3 MO HINH")
+        print("=" * 75)
 
-    metrics = evaluate_model(
-        y_test,
-        predictions,
-    )
+        comparison = pd.DataFrame(results)
 
-    print("\n" + "=" * 65)
-    print("KET QUA DANH GIA")
-    print("=" * 65)
+        print(
+            comparison[
+                [
+                    "model_name",
+                    "mae",
+                    "rmse",
+                    "r2",
+                    "training_time_seconds",
+                ]
+            ].to_string(index=False)
+        )
 
-    print(
-        f"MAE  : {metrics['mae']:,.4f}"
-    )
+        print("\nMO HINH CO MAE THAP NHAT:")
+        print(metadata["best_model"]["model_name"])
+        print(f"MAE : {metadata['best_model']['mae']:,.2f}")
+        print(f"RMSE: {metadata['best_model']['rmse']:,.2f}")
+        print(f"R2  : {metadata['best_model']['r2']:.6f}")
 
-    print(
-        f"RMSE : {metrics['rmse']:,.4f}"
-    )
+        print("\nHUAN LUYEN HOAN TAT!")
 
-    print(
-        f"R2   : {metrics['r2']:.6f}"
-    )
+        print("\nCAC MO HINH:")
+        for config in MODEL_CONFIGS.values():
+            print(f"- {MODEL_DIR / config['file']}")
 
-    # -------------------------------------------------
-    # BƯỚC 9: LƯU MÔ HÌNH
-    # -------------------------------------------------
+        print(f"\nMetadata: {METADATA_PATH}")
 
-    print("\n[8] Luu mo hinh...")
+    finally:
 
-    joblib.dump(
-        pipeline,
-        MODEL_PATH,
-        compress=3,
-    )
+        # Don thu muc tam neu con file.
+        if temp_model_dir.exists():
+            shutil.rmtree(
+                temp_model_dir,
+                ignore_errors=True,
+            )
 
-    print(
-        f"Da luu mo hinh: {MODEL_PATH}"
-    )
-
-    # -------------------------------------------------
-    # BƯỚC 10: LƯU METADATA
-    # -------------------------------------------------
-
-    print("\n[9] Luu metadata...")
-
-    elapsed_time = time.time() - start_time
-
-    save_metadata(
-        metrics=metrics,
-        train_rows=len(X_train),
-        test_rows=len(X_test),
-        training_time=elapsed_time,
-    )
-
-    # -------------------------------------------------
-    # BƯỚC 11: HOÀN TẤT
-    # -------------------------------------------------
-
-    print("\n" + "=" * 65)
-    print("HUAN LUYEN THANH CONG!")
-    print("=" * 65)
-
-    print(
-        f"Thoi gian: {elapsed_time / 60:.2f} phut"
-    )
-
-    print(
-        f"MAE : {metrics['mae']:,.2f}"
-    )
-
-    print(
-        f"RMSE: {metrics['rmse']:,.2f}"
-    )
-
-    print(
-        f"R2  : {metrics['r2']:.6f}"
-    )
-
-    print("\nCac file da tao:")
-
-    print("- models/best_model.pkl")
-
-    print("- models/model_metadata.json")
-
-    print("\nPhoneValue AI - Hoan tat huan luyen!")
+        gc.collect()
 
 
 # =====================================================
-# 6. CHẠY CHƯƠNG TRÌNH
+# 9. CHAY CHUONG TRINH
 # =====================================================
 
 if __name__ == "__main__":
-    main()
 
+    try:
+        main()
+
+    except Exception as error:
+
+        print("\n" + "=" * 70)
+        print("DA XAY RA LOI KHI HUAN LUYEN")
+        print("=" * 70)
+
+        print(f"{type(error).__name__}: {error}")
+
+        raise

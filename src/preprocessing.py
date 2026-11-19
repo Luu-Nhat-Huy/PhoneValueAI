@@ -1,11 +1,23 @@
 
+import numpy as np
+
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import (
+    OneHotEncoder,
+    StandardScaler,
+    FunctionTransformer,
+)
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
 
 
-# Các cột dạng chữ
+# =====================================================
+# 1. DANH SACH DAC TRUNG
+# =====================================================
+
 CATEGORICAL_FEATURES = [
     "brand",
     "model",
@@ -15,7 +27,6 @@ CATEGORICAL_FEATURES = [
     "seller_type",
 ]
 
-# Các cột dạng số
 NUMERIC_FEATURES = [
     "release_year",
     "ram_gb",
@@ -45,52 +56,163 @@ TARGET = "resale_price"
 ALL_FEATURES = CATEGORICAL_FEATURES + NUMERIC_FEATURES
 
 
-def create_preprocessor():
-    """
-    Mã hóa dữ liệu phân loại.
-    Các cột số được giữ nguyên.
-    """
+# =====================================================
+# 2. DANH SACH 3 MO HINH
+# =====================================================
 
-    return ColumnTransformer(
+MODEL_CONFIGS = {
+    "Linear Regression": {
+        "file": "linear_regression.pkl",
+        "description": "Mo hinh hoi quy tuyen tinh",
+    },
+
+    "Decision Tree Regression": {
+        "file": "decision_tree_regression.pkl",
+        "description": "Mo hinh cay hoi quy",
+    },
+
+    "Random Forest Regression": {
+        "file": "random_forest_regression.pkl",
+        "description": "Mo hinh rung ngau nhien",
+    },
+}
+
+
+# =====================================================
+# 3. TAO BO TIEN XU LY
+# =====================================================
+
+def create_preprocessor(model_name):
+
+    categorical_pipeline = Pipeline(
+        steps=[
+            (
+                "imputer",
+                SimpleImputer(
+                    strategy="most_frequent"
+                ),
+            ),
+            (
+                "onehot",
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=True,
+                    dtype=np.float32,
+                ),
+            ),
+        ]
+    )
+
+    numeric_steps = [
+        (
+            "imputer",
+            SimpleImputer(
+                strategy="median"
+            ),
+        ),
+        (
+            "to_float32",
+            FunctionTransformer(
+                np.asarray,
+                kw_args={"dtype": np.float32},
+            ),
+        ),
+    ]
+
+    if model_name == "Linear Regression":
+
+        numeric_steps.append(
+            (
+                "scaler",
+                StandardScaler(
+                    with_mean=False
+                ),
+            )
+        )
+
+    numeric_pipeline = Pipeline(
+        steps=numeric_steps
+    )
+
+    preprocessor = ColumnTransformer(
         transformers=[
             (
                 "categorical",
-                OneHotEncoder(
-                    handle_unknown="ignore",
-                    sparse_output=False,
-                    dtype="float32",
-                ),
+                categorical_pipeline,
                 CATEGORICAL_FEATURES,
             ),
             (
                 "numeric",
-                "passthrough",
+                numeric_pipeline,
                 NUMERIC_FEATURES,
             ),
         ],
         remainder="drop",
+        sparse_threshold=1.0,
     )
 
+    return preprocessor
 
-def create_model_pipeline():
-    """
-    Kết hợp tiền xử lý và mô hình thành một pipeline.
-    """
 
-    model = HistGradientBoostingRegressor(
-        learning_rate=0.08,
-        max_iter=120,
-        max_leaf_nodes=31,
-        l2_regularization=1.0,
-        early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=10,
-        random_state=42,
+# =====================================================
+# 4. TAO MO HINH
+# =====================================================
+
+def create_model_pipeline(model_name):
+
+    if model_name not in MODEL_CONFIGS:
+        raise ValueError(
+            f"Mo hinh khong duoc ho tro: {model_name}"
+        )
+
+    preprocessor = create_preprocessor(
+        model_name
     )
+
+    # -------------------------------------------------
+    # LINEAR REGRESSION
+    # -------------------------------------------------
+
+    if model_name == "Linear Regression":
+
+        model = LinearRegression(
+            n_jobs=2,
+        )
+
+    # -------------------------------------------------
+    # DECISION TREE REGRESSION
+    # -------------------------------------------------
+
+    elif model_name == "Decision Tree Regression":
+
+        model = DecisionTreeRegressor(
+            max_depth=20,
+            min_samples_leaf=5,
+            random_state=42,
+        )
+
+    # -------------------------------------------------
+    # RANDOM FOREST REGRESSION
+    # -------------------------------------------------
+
+    elif model_name == "Random Forest Regression":
+
+        model = RandomForestRegressor(
+            n_estimators=50,
+            max_depth=15,
+            min_samples_leaf=5,
+            max_features=0.5,
+            n_jobs=2,
+            random_state=42,
+        )
+
+    # -------------------------------------------------
+    # PIPELINE HOAN CHINH
+    # -------------------------------------------------
 
     pipeline = Pipeline(
         steps=[
-            ("preprocessor", create_preprocessor()),
+            ("preprocessor", preprocessor),
             ("model", model),
         ]
     )

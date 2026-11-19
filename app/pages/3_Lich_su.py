@@ -8,7 +8,7 @@ import streamlit as st
 
 
 # =====================================================
-# 1. CẤU HÌNH ĐƯỜNG DẪN VÀ IMPORT
+# 1. CAU HINH DUONG DAN VA IMPORT DATABASE
 # =====================================================
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -28,21 +28,200 @@ from database import (
 
 
 # =====================================================
-# 2. CẤU HÌNH TRANG
+# 2. CAU HINH DON VI GIA
 # =====================================================
 
-st.title("🕘 Lịch sử định giá")
+# 1 don vi dataset = 1.000 VND
+PRICE_SCALE = 1000
 
-st.caption(
-    "Quản lý, tìm kiếm và xem lại các lần định giá "
-    "điện thoại đã thực hiện."
+
+def format_vnd(value):
+    """Chuyen gia tri dataset sang VND de hien thi."""
+    try:
+        if pd.isna(value):
+            return "N/A"
+
+        amount = float(value) * PRICE_SCALE
+        return f"{amount:,.0f} ₫"
+
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def safe_float(value):
+    """Chuyen gia tri sang so thuc an toan."""
+    try:
+        if value is None or pd.isna(value):
+            return None
+
+        return float(value)
+
+    except (TypeError, ValueError):
+        return None
+
+
+# =====================================================
+# 3. CSS
+# =====================================================
+
+st.markdown(
+    """
+    <style>
+    .history-title {
+        font-size: 32px;
+        font-weight: 800;
+        color: #1976D2;
+        margin-bottom: 5px;
+    }
+
+    .history-description {
+        color: #777;
+        font-size: 15px;
+        margin-bottom: 20px;
+    }
+
+    div[data-testid="stMetric"] {
+        background-color: rgba(128, 128, 128, 0.08);
+        padding: 15px;
+        border-radius: 12px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-st.divider()
+
+# =====================================================
+# 4. HAM PHAN TICH PHONE_DATA
+# =====================================================
+
+def parse_phone_data(value):
+
+    if isinstance(value, dict):
+        return value
+
+    if not isinstance(value, str):
+        return {}
+
+    try:
+        result = json.loads(value)
+
+        if isinstance(result, dict):
+            return result
+
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return {}
 
 
 # =====================================================
-# 3. HÀM ĐỌC LỊCH SỬ
+# 5. CHUAN HOA DU LIEU LICH SU
+# =====================================================
+
+def normalize_history(records):
+
+    if records is None or len(records) == 0:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(records)
+
+    if df.empty:
+        return df
+
+    # Phan tich phone_data
+    if "phone_data" in df.columns:
+        df["phone_data_parsed"] = df["phone_data"].apply(
+            parse_phone_data
+        )
+    else:
+        df["phone_data_parsed"] = [
+            {} for _ in range(len(df))
+        ]
+
+    # Lay thong tin tu phone_data neu chua co cot truc tiep
+    fields = [
+        "brand",
+        "model",
+        "condition",
+        "processor_score",
+        "camera_score",
+        "city_tier",
+        "ram_gb",
+        "storage_gb",
+    ]
+
+    for field in fields:
+
+        if field not in df.columns:
+
+            df[field] = df["phone_data_parsed"].apply(
+                lambda data: data.get(field, "")
+                if isinstance(data, dict)
+                else ""
+            )
+
+        else:
+
+            missing_mask = (
+                df[field].isna()
+                | df[field].astype(str).str.strip().eq("")
+            )
+
+            df.loc[missing_mask, field] = (
+                df.loc[missing_mask, "phone_data_parsed"].apply(
+                    lambda data: data.get(field, "")
+                    if isinstance(data, dict)
+                    else ""
+                )
+            )
+
+    # Dam bao cac cot quan trong luon ton tai
+    required_columns = [
+        "id",
+        "created_at",
+        "brand",
+        "model",
+        "condition",
+        "original_price",
+        "predicted_price",
+        "phone_data_parsed",
+    ]
+
+    for column in required_columns:
+
+        if column not in df.columns:
+            df[column] = None
+
+    # Chuyen doi kieu du lieu
+    numeric_columns = [
+        "predicted_price",
+        "original_price",
+        "processor_score",
+        "camera_score",
+        "ram_gb",
+        "storage_gb",
+    ]
+
+    for column in numeric_columns:
+
+        if column in df.columns:
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce",
+            )
+
+    # Chuyen ngay gio
+    df["created_at_parsed"] = pd.to_datetime(
+        df["created_at"],
+        errors="coerce",
+    )
+
+    return df
+
+
+# =====================================================
+# 6. DOC LICH SU
 # =====================================================
 
 @st.cache_data(ttl=5)
@@ -50,77 +229,8 @@ def load_history():
 
     records = get_all_valuations()
 
-    if records is None or len(records) == 0:
-        return pd.DataFrame()
+    return normalize_history(records)
 
-    df = pd.DataFrame(records)
-
-    if "phone_data" in df.columns:
-
-        def parse_phone_data(value):
-
-            if isinstance(value, dict):
-                return value
-
-            if not isinstance(value, str):
-                return {}
-
-            try:
-                result = json.loads(value)
-
-                if isinstance(result, dict):
-                    return result
-
-                return {}
-
-            except (json.JSONDecodeError, TypeError):
-                return {}
-
-        df["phone_data_parsed"] = df[
-            "phone_data"
-        ].apply(parse_phone_data)
-
-        for column in [
-            "brand",
-            "model",
-            "condition",
-        ]:
-
-            if column not in df.columns:
-
-                df[column] = df[
-                    "phone_data_parsed"
-                ].apply(
-                    lambda x: x.get(column, "")
-                )
-
-    if "created_at" in df.columns:
-
-        df["created_at_parsed"] = pd.to_datetime(
-            df["created_at"],
-            errors="coerce",
-        )
-
-    if "predicted_price" in df.columns:
-
-        df["predicted_price"] = pd.to_numeric(
-            df["predicted_price"],
-            errors="coerce",
-        )
-
-    if "original_price" in df.columns:
-
-        df["original_price"] = pd.to_numeric(
-            df["original_price"],
-            errors="coerce",
-        )
-
-    return df
-
-
-# =====================================================
-# 4. TẢI DỮ LIỆU
-# =====================================================
 
 try:
 
@@ -128,98 +238,95 @@ try:
 
 except Exception as error:
 
-    st.error(
-        f"Không thể tải lịch sử định giá: {error}"
-    )
-
+    st.error(f"Không thể tải lịch sử định giá: {error}")
     st.stop()
 
+
+# =====================================================
+# 7. TIEU DE TRANG
+# =====================================================
+
+st.markdown(
+    '<div class="history-title">🕘 LỊCH SỬ ĐỊNH GIÁ</div>',
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    '<div class="history-description">'
+    'Quản lý, tìm kiếm và xem lại các lần định giá '
+    'điện thoại đã thực hiện bằng PhoneValue AI.'
+    '</div>',
+    unsafe_allow_html=True,
+)
+
+st.info(
+    "Tất cả giá tiền trên trang được hiển thị bằng VNĐ. "
+    "Dữ liệu gốc của mô hình vẫn được giữ nguyên."
+)
+
+st.divider()
+
+
+# =====================================================
+# 8. KIEM TRA LICH SU
+# =====================================================
 
 if history_df.empty:
 
     st.info(
         "Chưa có lịch sử định giá nào. "
-        "Hãy đến trang Định giá điện thoại để thực hiện "
-        "lần định giá đầu tiên."
+        "Hãy đến trang Định giá để thực hiện lần định giá đầu tiên."
     )
 
     st.stop()
 
 
 # =====================================================
-# 5. THỐNG KÊ TỔNG QUAN
+# 9. THONG KE TONG QUAN
 # =====================================================
 
 st.subheader("📊 Tổng quan lịch sử")
 
 total_valuations = len(history_df)
 
-average_price = history_df[
-    "predicted_price"
-].mean()
-
-highest_price = history_df[
-    "predicted_price"
-].max()
-
-lowest_price = history_df[
-    "predicted_price"
-].min()
+average_price = history_df["predicted_price"].mean()
+highest_price = history_df["predicted_price"].max()
+lowest_price = history_df["predicted_price"].min()
 
 col1, col2, col3, col4 = st.columns(4)
 
-with col1:
+col1.metric(
+    "Tổng lần định giá",
+    f"{total_valuations:,}",
+)
 
-    st.metric(
-        "Tổng lần định giá",
-        f"{total_valuations:,}",
-    )
+col2.metric(
+    "Giá trung bình",
+    format_vnd(average_price),
+)
 
-with col2:
+col3.metric(
+    "Giá cao nhất",
+    format_vnd(highest_price),
+)
 
-    st.metric(
-        "Giá trung bình",
-        (
-            f"{average_price:,.2f}"
-            if pd.notna(average_price)
-            else "N/A"
-        ),
-    )
-
-with col3:
-
-    st.metric(
-        "Giá cao nhất",
-        (
-            f"{highest_price:,.2f}"
-            if pd.notna(highest_price)
-            else "N/A"
-        ),
-    )
-
-with col4:
-
-    st.metric(
-        "Giá thấp nhất",
-        (
-            f"{lowest_price:,.2f}"
-            if pd.notna(lowest_price)
-            else "N/A"
-        ),
-    )
+col4.metric(
+    "Giá thấp nhất",
+    format_vnd(lowest_price),
+)
 
 
 # =====================================================
-# 6. BỘ LỌC LỊCH SỬ
+# 10. BO LOC VA TIM KIEM
 # =====================================================
 
 st.divider()
 
-st.subheader("🔎 Tìm kiếm và lọc")
+st.subheader("🔎 Tìm kiếm và lọc lịch sử")
 
 search_keyword = st.text_input(
     "Tìm theo thương hiệu hoặc model",
-    placeholder="Ví dụ: Samsung, iPhone, Realme...",
+    placeholder="Ví dụ: Samsung, iPhone, Xiaomi...",
 )
 
 col1, col2 = st.columns(2)
@@ -234,7 +341,7 @@ with col1:
         .tolist()
     )
 
-    selected_condition = st.multiselect(
+    selected_conditions = st.multiselect(
         "Tình trạng điện thoại",
         options=conditions,
         default=conditions,
@@ -250,7 +357,7 @@ with col2:
         .tolist()
     )
 
-    selected_brand = st.multiselect(
+    selected_brands = st.multiselect(
         "Thương hiệu",
         options=brands,
         default=brands,
@@ -258,24 +365,19 @@ with col2:
 
 
 # =====================================================
-# 7. LỌC THEO NGÀY
+# 11. LOC THEO NGAY
 # =====================================================
 
 filtered_df = history_df.copy()
 
-if not filtered_df["created_at_parsed"].dropna().empty:
+valid_dates = filtered_df[
+    "created_at_parsed"
+].dropna()
 
-    min_date = (
-        filtered_df["created_at_parsed"]
-        .min()
-        .date()
-    )
+if not valid_dates.empty:
 
-    max_date = (
-        filtered_df["created_at_parsed"]
-        .max()
-        .date()
-    )
+    min_date = valid_dates.min().date()
+    max_date = valid_dates.max().date()
 
     date_range = st.date_input(
         "Khoảng thời gian định giá",
@@ -290,78 +392,83 @@ if not filtered_df["created_at_parsed"].dropna().empty:
 
             start_date, end_date = date_range
 
-            filtered_df = filtered_df[
-                filtered_df[
-                    "created_at_parsed"
-                ].dt.date.between(
-                    start_date,
-                    end_date,
+            if start_date and end_date:
+
+                date_mask = (
+                    filtered_df["created_at_parsed"]
+                    .dt.date
+                    .between(start_date, end_date)
                 )
-            ]
+
+                filtered_df = filtered_df[
+                    date_mask
+                    | filtered_df["created_at_parsed"].isna()
+                ]
 
 
 # =====================================================
-# 8. ÁP DỤNG BỘ LỌC
+# 12. LOC THEO THUONG HIEU VA TINH TRANG
 # =====================================================
 
-if not selected_condition:
-    filtered_df = filtered_df.iloc[0:0]
+if selected_conditions:
 
-else:
     filtered_df = filtered_df[
-        filtered_df["condition"].isin(
-            selected_condition
-        )
+        filtered_df["condition"]
+        .astype(str)
+        .isin(selected_conditions)
     ]
 
+else:
 
-if not selected_brand:
     filtered_df = filtered_df.iloc[0:0]
 
-else:
+
+if selected_brands:
+
     filtered_df = filtered_df[
-        filtered_df["brand"].isin(
-            selected_brand
-        )
+        filtered_df["brand"]
+        .astype(str)
+        .isin(selected_brands)
     ]
 
+else:
+
+    filtered_df = filtered_df.iloc[0:0]
+
+
+# =====================================================
+# 13. TIM KIEM THEO TU KHOA
+# =====================================================
 
 if search_keyword.strip():
 
-    keyword = search_keyword.strip().lower()
+    keyword = search_keyword.strip()
 
-    search_columns = [
-        "brand",
-        "model",
-    ]
-
-    search_mask = pd.Series(
-        False,
-        index=filtered_df.index,
+    search_mask = (
+        filtered_df["brand"]
+        .astype(str)
+        .str.contains(
+            keyword,
+            case=False,
+            na=False,
+            regex=False,
+        )
+        |
+        filtered_df["model"]
+        .astype(str)
+        .str.contains(
+            keyword,
+            case=False,
+            na=False,
+            regex=False,
+        )
     )
 
-    for column in search_columns:
-
-        if column in filtered_df.columns:
-
-            search_mask |= (
-                filtered_df[column]
-                .astype(str)
-                .str.lower()
-                .str.contains(
-                    keyword,
-                    na=False,
-                    regex=False,
-                )
-            )
-
-    filtered_df = filtered_df[
-        search_mask
-    ]
+    filtered_df = filtered_df[search_mask]
 
 
 # =====================================================
-# 9. HIỂN THỊ BẢNG LỊCH SỬ
+# 14. DANH SACH LICH SU
 # =====================================================
 
 st.divider()
@@ -380,24 +487,16 @@ if filtered_df.empty:
 
 else:
 
-    display_columns = [
-        "id",
-        "created_at",
-        "brand",
-        "model",
-        "condition",
-        "original_price",
-        "predicted_price",
-    ]
-
-    available_columns = [
-        column
-        for column in display_columns
-        if column in filtered_df.columns
-    ]
-
     display_df = filtered_df[
-        available_columns
+        [
+            "id",
+            "created_at",
+            "brand",
+            "model",
+            "condition",
+            "original_price",
+            "predicted_price",
+        ]
     ].copy()
 
     display_df = display_df.rename(
@@ -412,6 +511,14 @@ else:
         }
     )
 
+    display_df["Giá mua ban đầu"] = (
+        display_df["Giá mua ban đầu"].apply(format_vnd)
+    )
+
+    display_df["Giá dự đoán"] = (
+        display_df["Giá dự đoán"].apply(format_vnd)
+    )
+
     st.dataframe(
         display_df,
         use_container_width=True,
@@ -420,7 +527,7 @@ else:
 
 
 # =====================================================
-# 10. XUẤT CSV
+# 15. XUAT LICH SU CSV
 # =====================================================
 
 st.divider()
@@ -430,9 +537,54 @@ st.subheader("📥 Xuất lịch sử")
 if not filtered_df.empty:
 
     export_df = filtered_df.drop(
-        columns=["phone_data_parsed"],
+        columns=[
+            "phone_data_parsed",
+            "created_at_parsed",
+        ],
         errors="ignore",
-    )
+    ).copy()
+
+    # Gia goc theo don vi dataset
+    if "original_price" in export_df.columns:
+
+        export_df["original_price_dataset_units"] = (
+            export_df["original_price"]
+        )
+
+        export_df["original_price_vnd"] = (
+            export_df["original_price"] * PRICE_SCALE
+        )
+
+        export_df = export_df.drop(
+            columns=["original_price"]
+        )
+
+    if "predicted_price" in export_df.columns:
+
+        export_df["predicted_price_dataset_units"] = (
+            export_df["predicted_price"]
+        )
+
+        export_df["predicted_price_vnd"] = (
+            export_df["predicted_price"] * PRICE_SCALE
+        )
+
+        export_df = export_df.drop(
+            columns=["predicted_price"]
+        )
+
+    # Chuyen dictionary/list thanh JSON
+    for column in export_df.columns:
+
+        if export_df[column].dtype == "object":
+
+            export_df[column] = export_df[column].apply(
+                lambda value: (
+                    json.dumps(value, ensure_ascii=False)
+                    if isinstance(value, (dict, list))
+                    else value
+                )
+            )
 
     csv_data = export_df.to_csv(
         index=False,
@@ -446,99 +598,136 @@ if not filtered_df.empty:
         use_container_width=True,
     )
 
+    st.caption(
+        "CSV chứa giá gốc theo đơn vị dataset và giá đã quy đổi sang VNĐ."
+    )
+
 
 # =====================================================
-# 11. XEM CHI TIẾT BẢN GHI
+# 16. XEM CHI TIET BAN GHI
 # =====================================================
 
 st.divider()
 
 st.subheader("🔍 Chi tiết lần định giá")
 
+selected_id = None
+
 if not filtered_df.empty:
 
-    available_ids = filtered_df["id"].tolist()
-
-    selected_id = st.selectbox(
-        "Chọn bản ghi muốn xem",
-        options=available_ids,
-        format_func=lambda x: f"Mã định giá #{x}",
+    available_ids = (
+        filtered_df["id"]
+        .dropna()
+        .tolist()
     )
 
-    selected_record = filtered_df[
-        filtered_df["id"] == selected_id
-    ].iloc[0]
+    if available_ids:
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.metric(
-            "Giá dự đoán",
-            (
-                f"{selected_record['predicted_price']:,.2f}"
-                if pd.notna(
-                    selected_record["predicted_price"]
-                )
-                else "N/A"
-            ),
+        selected_id = st.selectbox(
+            "Chọn bản ghi muốn xem",
+            options=available_ids,
+            format_func=lambda value: f"Mã định giá #{value}",
         )
 
-    with col2:
+        selected_record = filtered_df[
+            filtered_df["id"] == selected_id
+        ].iloc[0]
 
-        original = selected_record.get(
-            "original_price",
-            None,
-        )
+        predicted = selected_record.get("predicted_price")
+        original = selected_record.get("original_price")
 
-        if pd.notna(original):
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            st.metric(
+                "Giá dự đoán",
+                format_vnd(predicted),
+            )
+
+        with col2:
 
             st.metric(
                 "Giá mua ban đầu",
-                f"{original:,.2f}",
+                format_vnd(original),
             )
 
-    phone_data = selected_record.get(
-        "phone_data_parsed",
-        {},
-    )
+        phone_data = selected_record.get(
+            "phone_data_parsed",
+            {},
+        )
 
-    if not isinstance(phone_data, dict):
-        phone_data = {}
+        if not isinstance(phone_data, dict):
+            phone_data = {}
 
-    with st.expander(
-        "Xem thông số điện thoại"
-    ):
+        with st.expander("📱 Thông số điện thoại"):
 
-        st.json(phone_data)
+            if phone_data:
 
-    with st.expander(
-        "Xem thông tin bản ghi"
-    ):
+                display_phone_data = phone_data.copy()
 
-        st.json(
-            {
+                raw_original_price = safe_float(
+                    display_phone_data.pop(
+                        "original_price",
+                        None,
+                    )
+                )
+
+                if raw_original_price is not None:
+
+                    display_phone_data[
+                        "original_price_vnd"
+                    ] = raw_original_price * PRICE_SCALE
+
+                st.json(display_phone_data)
+
+                st.caption(
+                    "Giá trong phần thông số đã được quy đổi sang VNĐ. "
+                    "Dữ liệu lưu trong database vẫn giữ nguyên."
+                )
+
+            else:
+
+                st.info(
+                    "Bản ghi này không lưu thông số điện thoại."
+                )
+
+        with st.expander("🗂️ Thông tin bản ghi"):
+
+            original_value = safe_float(original)
+            predicted_value = safe_float(predicted)
+
+            record_info = {
                 "id": selected_record.get("id"),
-                "created_at": selected_record.get(
-                    "created_at"
-                ),
+                "created_at": selected_record.get("created_at"),
                 "brand": selected_record.get("brand"),
                 "model": selected_record.get("model"),
-                "condition": selected_record.get(
-                    "condition"
+                "condition": selected_record.get("condition"),
+                "original_price_dataset_units": original_value,
+                "original_price_vnd": (
+                    original_value * PRICE_SCALE
+                    if original_value is not None
+                    else None
                 ),
-                "original_price": selected_record.get(
-                    "original_price"
-                ),
-                "predicted_price": selected_record.get(
-                    "predicted_price"
+                "predicted_price_dataset_units": predicted_value,
+                "predicted_price_vnd": (
+                    predicted_value * PRICE_SCALE
+                    if predicted_value is not None
+                    else None
                 ),
             }
+
+            st.json(record_info)
+
+    else:
+
+        st.info(
+            "Các bản ghi hiện tại không có ID để xem chi tiết."
         )
 
 
 # =====================================================
-# 12. XÓA MỘT BẢN GHI
+# 17. XOA MOT BAN GHI
 # =====================================================
 
 st.divider()
@@ -547,59 +736,59 @@ st.subheader("🗑️ Quản lý lịch sử")
 
 if not filtered_df.empty:
 
-    st.warning(
-        "Thao tác xóa bản ghi sẽ không thể tự động hoàn tác."
+    available_ids = (
+        filtered_df["id"]
+        .dropna()
+        .tolist()
     )
 
-    confirm_delete = st.checkbox(
-        "Tôi xác nhận muốn xóa một bản ghi.",
-        key="confirm_delete_one",
-    )
+    if available_ids and selected_id is not None:
 
-    if st.button(
-        "Xóa bản ghi đang chọn",
-        disabled=not confirm_delete,
-        use_container_width=True,
-    ):
+        st.warning(
+            "Thao tác xóa bản ghi sẽ không thể tự động hoàn tác."
+        )
 
-        try:
+        confirm_delete = st.checkbox(
+            "Tôi xác nhận muốn xóa bản ghi đang chọn.",
+            key="confirm_delete_one",
+        )
 
-            delete_valuation(
-                int(selected_id)
-            )
+        if st.button(
+            "Xóa bản ghi đang chọn",
+            disabled=not confirm_delete,
+            use_container_width=True,
+        ):
 
-            load_history.clear()
+            try:
 
-            st.session_state[
-                "confirm_delete_one"
-            ] = False
+                delete_valuation(int(selected_id))
 
-            st.success(
-                f"Đã xóa bản ghi #{selected_id}."
-            )
+                load_history.clear()
 
-            st.rerun()
+                st.success(
+                    f"Đã xóa bản ghi #{selected_id}."
+                )
 
-        except Exception as error:
+                st.rerun()
 
-            st.error(
-                f"Không thể xóa bản ghi: {error}"
-            )
+            except Exception as error:
+
+                st.error(
+                    f"Không thể xóa bản ghi: {error}"
+                )
 
 
 # =====================================================
-# 13. XÓA TOÀN BỘ LỊCH SỬ
+# 18. XOA TOAN BO LICH SU
 # =====================================================
 
 st.divider()
 
-with st.expander(
-    "⚠️ Xóa toàn bộ lịch sử định giá"
-):
+with st.expander("⚠️ Xóa toàn bộ lịch sử định giá"):
 
     st.error(
-        "Cảnh báo: Thao tác này sẽ xóa tất cả "
-        "bản ghi lịch sử trong database."
+        "Cảnh báo: Thao tác này sẽ xóa tất cả bản ghi "
+        "lịch sử định giá trong database."
     )
 
     confirm_clear = st.checkbox(
@@ -620,10 +809,6 @@ with st.expander(
 
             load_history.clear()
 
-            st.session_state[
-                "confirm_clear_all"
-            ] = False
-
             st.success(
                 "Đã xóa toàn bộ lịch sử định giá."
             )
@@ -638,7 +823,7 @@ with st.expander(
 
 
 # =====================================================
-# 14. KẾT THÚC
+# 19. FOOTER
 # =====================================================
 
 st.divider()

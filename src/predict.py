@@ -9,14 +9,13 @@ import pandas as pd
 
 
 # =====================================================
-# 1. CẤU HÌNH ĐƯỜNG DẪN
+# 1. CAU HINH DUONG DAN VA MO HINH
 # =====================================================
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-MODEL_PATH = ROOT_DIR / "models" / "best_model.pkl"
-
-METADATA_PATH = ROOT_DIR / "models" / "model_metadata.json"
+MODEL_DIR = ROOT_DIR / "models"
+METADATA_PATH = MODEL_DIR / "model_metadata.json"
 
 DATA_PATH = (
     ROOT_DIR
@@ -25,20 +24,20 @@ DATA_PATH = (
     / "used_phone_price_prediction_1M.csv.gz"
 )
 
+EXPECTED_MODELS = {
+    "Linear Regression": "linear_regression.pkl",
+    "Decision Tree Regression": "decision_tree_regression.pkl",
+    "Random Forest Regression": "random_forest_regression.pkl",
+}
+
+DEFAULT_MODEL = "Random Forest Regression"
+
 
 # =====================================================
-# 2. TẢI MÔ HÌNH
+# 2. DOC VA KIEM TRA METADATA
 # =====================================================
 
-def load_model():
-    """
-    Tải mô hình và metadata.
-    """
-
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(
-            f"Khong tim thay mo hinh: {MODEL_PATH}"
-        )
+def load_metadata():
 
     if not METADATA_PATH.exists():
         raise FileNotFoundError(
@@ -46,24 +45,16 @@ def load_model():
         )
 
     try:
-        model = joblib.load(MODEL_PATH)
-
-        with open(
-            METADATA_PATH,
-            "r",
-            encoding="utf-8",
-        ) as file:
+        with open(METADATA_PATH, "r", encoding="utf-8") as file:
             metadata = json.load(file)
 
     except Exception as error:
         raise RuntimeError(
-            f"Khong the tai mo hinh: {error}"
+            f"Khong the doc metadata: {error}"
         ) from error
 
     if not isinstance(metadata, dict):
-        raise ValueError(
-            "Metadata khong dung dinh dang."
-        )
+        raise ValueError("Metadata khong dung dinh dang.")
 
     features = metadata.get("features")
 
@@ -72,17 +63,114 @@ def load_model():
             "Metadata khong co danh sach features hop le."
         )
 
+    if len(features) != len(set(features)):
+        raise ValueError(
+            "Metadata co dac trung bi trung lap."
+        )
+
+    models = metadata.get("models")
+
+    if not isinstance(models, list):
+        raise ValueError(
+            "Metadata khong co danh sach 3 mo hinh hop le."
+        )
+
+    model_names = {
+        item.get("model_name")
+        for item in models
+        if isinstance(item, dict)
+    }
+
+    expected_names = set(EXPECTED_MODELS.keys())
+
+    if model_names != expected_names:
+        raise ValueError(
+            "Danh sach mo hinh trong metadata khong dung.\n"
+            f"Can co: {sorted(expected_names)}\n"
+            f"Hien tai: {sorted(model_names)}"
+        )
+
+    for item in models:
+
+        expected_file = EXPECTED_MODELS[item["model_name"]]
+
+        if item.get("model_file") != expected_file:
+            raise ValueError(
+                f"File mo hinh khong dung cho {item['model_name']}."
+            )
+
+    return metadata
+
+
+# =====================================================
+# 3. LAY DANH SACH MO HINH
+# =====================================================
+
+def get_available_models():
+
+    return list(EXPECTED_MODELS.keys())
+
+
+# =====================================================
+# 4. LAY MO HINH MAC DINH
+# =====================================================
+
+def get_default_model():
+
+    metadata = load_metadata()
+
+    selected_model = metadata.get("selected_default_model")
+
+    if selected_model not in EXPECTED_MODELS:
+        raise ValueError(
+            f"Mo hinh mac dinh khong hop le: {selected_model}"
+        )
+
+    return selected_model
+
+
+# =====================================================
+# 5. TAI MO HINH
+# =====================================================
+
+def load_model(model_name=None):
+
+    metadata = load_metadata()
+
+    if model_name is None:
+        model_name = metadata.get("selected_default_model")
+
+    if model_name not in EXPECTED_MODELS:
+        raise ValueError(
+            f"Mo hinh khong duoc ho tro: {model_name}\n"
+            f"Cac mo hinh hien co: {list(EXPECTED_MODELS.keys())}"
+        )
+
+    model_filename = EXPECTED_MODELS[model_name]
+
+    model_path = MODEL_DIR / model_filename
+
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Khong tim thay file mo hinh: {model_path}"
+        )
+
+    try:
+        model = joblib.load(model_path)
+
+    except Exception as error:
+        raise RuntimeError(
+            f"Khong the tai mo hinh {model_name}: {error}"
+        ) from error
+
     return model, metadata
 
 
 # =====================================================
-# 3. KIỂM TRA DỮ LIỆU ĐẦU VÀO
+# 6. KIEM TRA DU LIEU DAU VAO
 # =====================================================
 
 def validate_phone_data(phone_data, features):
-    """
-    Kiểm tra dữ liệu điện thoại trước khi dự đoán.
-    """
 
     if not isinstance(phone_data, dict):
         raise TypeError(
@@ -117,13 +205,8 @@ def validate_phone_data(phone_data, features):
                 f"Dac trung '{feature}' khong duoc de trong."
             )
 
-        if isinstance(value, (float, np.floating)):
-            if not np.isfinite(value):
-                raise ValueError(
-                    f"Dac trung '{feature}' co gia tri khong hop le."
-                )
-
         if isinstance(value, (int, float, np.integer, np.floating)):
+
             if not np.isfinite(value):
                 raise ValueError(
                     f"Dac trung '{feature}' co gia tri khong hop le."
@@ -135,25 +218,12 @@ def validate_phone_data(phone_data, features):
 
 
 # =====================================================
-# 4. DỰ ĐOÁN GIÁ ĐIỆN THOẠI
+# 7. DU DOAN GIA DIEN THOAI
 # =====================================================
 
-def predict_phone(phone_data):
-    """
-    Dự đoán giá bán lại của điện thoại.
+def predict_phone(phone_data, model_name=None):
 
-    Parameters
-    ----------
-    phone_data : dict
-        Dữ liệu đặc trưng của điện thoại.
-
-    Returns
-    -------
-    float
-        Giá điện thoại dự đoán.
-    """
-
-    model, metadata = load_model()
+    model, metadata = load_model(model_name)
 
     features = metadata["features"]
 
@@ -186,35 +256,41 @@ def predict_phone(phone_data):
 
 
 # =====================================================
-# 5. KIỂM TRA MÔ HÌNH BẰNG DỮ LIỆU THỰC
+# 8. KIEM TRA CA 3 MO HINH
 # =====================================================
 
 def test_prediction():
 
-    print("=" * 60)
-    print("PHONEVALUE AI - KIEM TRA CHUC NANG DU DOAN")
-    print("=" * 60)
+    print("=" * 65)
+    print("PHONEVALUE AI - KIEM TRA CA 3 MO HINH")
+    print("=" * 65)
 
-    # Tải mô hình
-    model, metadata = load_model()
+    metadata = load_metadata()
 
-    print("\nTai mo hinh thanh cong!")
+    print("\nTai metadata thanh cong!")
 
-    print(
-        f"Mo hinh: {metadata.get('model_name', 'Unknown')}"
-    )
+    models = get_available_models()
 
-    # Kiểm tra dataset
+    print("\nDanh sach mo hinh:")
+
+    for name in models:
+        print(f"- {name}")
+
+    selected_model = get_default_model()
+
+    print(f"\nMo hinh mac dinh: {selected_model}")
+
     if not DATA_PATH.exists():
         raise FileNotFoundError(
             f"Khong tim thay dataset: {DATA_PATH}"
         )
 
-    # Đọc một dòng dữ liệu
-    df = pd.read_csv(
-        DATA_PATH,
-        nrows=1,
-    )
+    df = pd.read_csv(DATA_PATH, nrows=1)
+
+    if df.empty:
+        raise ValueError(
+            "Khong co du lieu kiem tra."
+        )
 
     features = metadata["features"]
 
@@ -235,65 +311,52 @@ def test_prediction():
             "Dataset khong co cot resale_price."
         )
 
-    if df.empty:
-        raise ValueError(
-            "Khong co du lieu kiem tra."
-        )
-
-    # Lấy dữ liệu đầu vào
     phone_data = df.iloc[0][features].to_dict()
 
-    actual_price = float(
-        df.iloc[0]["resale_price"]
-    )
+    actual_price = float(df.iloc[0]["resale_price"])
 
-    # Hiển thị thông tin
+    if not np.isfinite(actual_price):
+        raise ValueError("Gia thuc te khong hop le.")
+
     print("\nTHONG TIN KIEM TRA")
-    print("-" * 60)
+    print("-" * 65)
 
     for key, value in phone_data.items():
         print(f"{key}: {value}")
 
-    # Dự đoán
-    predicted_price = predict_phone(
-        phone_data
-    )
+    print("\nKET QUA KIEM TRA")
+    print("-" * 65)
 
-    error = abs(
-        actual_price - predicted_price
-    )
+    for index, name in enumerate(models, start=1):
 
-    error_percent = (
-        error / abs(actual_price) * 100
-        if actual_price != 0
-        else 0
-    )
+        predicted_price = predict_phone(
+            phone_data,
+            model_name=name,
+        )
 
-    # Kết quả
-    print("\nKET QUA")
-    print("-" * 60)
+        error = abs(actual_price - predicted_price)
 
-    print(
-        f"Gia thuc te : {actual_price:,.2f}"
-    )
+        error_percent = (
+            error / abs(actual_price) * 100
+            if actual_price != 0
+            else 0
+        )
 
-    print(
-        f"Gia du doan : {predicted_price:,.2f}"
-    )
+        print(f"\n[{index}/3] {name}")
+        print(f"Gia thuc te : {actual_price:,.2f}")
+        print(f"Gia du doan : {predicted_price:,.2f}")
+        print(f"Sai lech     : {error:,.2f}")
+        print(f"Ty le sai lech: {error_percent:.2f}%")
+        print("Trang thai   : THANH CONG")
 
-    print(
-        f"Sai lech     : {error:,.2f}"
-    )
-
-    print(
-        f"Ty le sai lech: {error_percent:.2f}%"
-    )
-
-    print("\nKiem tra chuc nang du doan hoan tat!")
+    print("\n" + "=" * 65)
+    print("DA KIEM TRA THANH CONG CA 3 MO HINH!")
+    print(f"Mo hinh mac dinh: {selected_model}")
+    print("=" * 65)
 
 
 # =====================================================
-# 6. CHẠY CHƯƠNG TRÌNH
+# 9. CHAY CHUONG TRINH
 # =====================================================
 
 if __name__ == "__main__":
@@ -303,11 +366,10 @@ if __name__ == "__main__":
 
     except Exception as error:
 
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 65)
         print("DA XAY RA LOI")
-        print("=" * 60)
+        print("=" * 65)
 
         print(error)
 
         sys.exit(1)
-

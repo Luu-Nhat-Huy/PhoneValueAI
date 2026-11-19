@@ -1,519 +1,338 @@
-﻿
-
-# PhoneValue AI – Hệ thống định giá điện thoại cũ bằng Machine Learning
-
-
+﻿# PhoneValue AI – Hệ thống định giá điện thoại cũ bằng Machine Learning
 
 ## 1. Giới thiệu
 
+**PhoneValue AI** là ứng dụng web sử dụng Machine Learning để dự đoán giá bán lại của điện thoại đã qua sử dụng.
 
+Hệ thống cho phép người dùng nhập thông tin điện thoại, nhận kết quả định giá, phân tích dữ liệu, theo dõi lịch sử định giá và tìm hiểu thông tin về các mô hình dự đoán.
 
-PhoneValue AI là ứng dụng sử dụng Machine Learning để dự đoán giá bán lại của điện thoại đã qua sử dụng.
-
-
-
-Hệ thống cho phép người dùng nhập thông tin điện thoại, nhận kết quả định giá, phân tích dữ liệu, xem lịch sử định giá và tìm hiểu thông tin về mô hình dự đoán.
-
-
+Dự án được xây dựng bằng Python và Streamlit, sử dụng bộ dữ liệu gồm 1.000.000 bản ghi.
 
 ## 2. Mục tiêu dự án
 
-
-
-\- Xây dựng mô hình Machine Learning dự đoán giá bán lại điện thoại cũ.
-
-\- Phân tích các yếu tố ảnh hưởng đến giá trị điện thoại.
-
-\- Xây dựng ứng dụng web thân thiện, dễ sử dụng.
-
-\- Lưu trữ và quản lý lịch sử định giá.
-
-\- Đánh giá hiệu quả của mô hình thông qua các chỉ số MAE, RMSE và R².
-
-
+- Xây dựng mô hình Machine Learning dự đoán giá bán lại điện thoại cũ.
+- So sánh hiệu quả của nhiều thuật toán hồi quy.
+- Phân tích các yếu tố ảnh hưởng đến giá trị điện thoại.
+- Xây dựng ứng dụng web trực quan, dễ sử dụng.
+- Lưu trữ và quản lý lịch sử định giá.
+- Đánh giá hiệu quả mô hình thông qua MAE, RMSE và R².
 
 ## 3. Công nghệ sử dụng
 
-
-
 | Công nghệ | Mục đích |
-
 |---|---|
-
 | Python 3.13.7 | Ngôn ngữ lập trình |
-
-| Pandas, NumPy | Xử lý dữ liệu |
-
+| Pandas, NumPy | Xử lý và phân tích dữ liệu |
 | Scikit-learn | Xây dựng mô hình Machine Learning |
-
-| HistGradientBoostingRegressor | Thuật toán dự đoán |
-
-| Matplotlib, Seaborn, Plotly | Trực quan hóa dữ liệu |
-
+| Matplotlib, Seaborn | Trực quan hóa dữ liệu |
+| Plotly | Xây dựng biểu đồ tương tác |
 | Streamlit | Xây dựng giao diện web |
-
 | Joblib | Lưu và tải mô hình |
-
 | SQLite | Lưu lịch sử định giá |
 
+## 4. Dữ liệu sử dụng
 
+Dự án sử dụng bộ dữ liệu `used_phone_price_prediction_1M.csv.gz`.
 
-## 4. Dữ liệu
+Thông tin dữ liệu:
 
-
-
-Dự án sử dụng bộ dữ liệu điện thoại cũ gồm:
-
-
-
-\- 1.000.000 dòng dữ liệu.
-
-\- 27 đặc trưng đầu vào.
-
-\- 1 biến mục tiêu: `resale\_price`.
-
-
+- Số lượng: 1.000.000 dòng.
+- Số đặc trưng đầu vào: 27.
+- Biến mục tiêu: `resale_price`.
+- Định dạng: CSV nén bằng gzip.
 
 Một số thông tin đầu vào:
 
+- Thương hiệu và model điện thoại.
+- Hệ điều hành.
+- Giá mua ban đầu.
+- Tuổi đời thiết bị.
+- RAM và dung lượng lưu trữ.
+- Điểm hiệu năng CPU.
+- Điểm camera.
+- Tình trạng pin.
+- Tình trạng ngoại hình.
+- Lịch sử sửa chữa.
+- Tình trạng bảo hành.
+- Nhu cầu thị trường.
+- Loại người bán và khu vực thành phố.
 
+### Đơn vị giá
 
-\- Hãng và model điện thoại.
+Giá trong dataset được lưu theo đơn vị **nghìn VND**.
 
-\- Năm phát hành.
+Ví dụ:
 
-\- RAM và dung lượng lưu trữ.
+| Giá trị trong dataset | Giá trị quy đổi |
+|---:|---:|
+| 10.000 | 10.000.000 VND |
+| 45.000 | 45.000.000 VND |
+| 80.000 | 80.000.000 VND |
 
-\- Dung lượng pin và tình trạng pin.
+Ứng dụng thực hiện quy đổi để hiển thị giá theo VND cho người dùng. Dữ liệu đầu vào và đầu ra của mô hình vẫn được giữ theo đơn vị gốc để bảo đảm tính nhất quán khi dự đoán.
 
-\- Tình trạng ngoại hình.
+## 5. Các mô hình Machine Learning
 
-\- Lịch sử sửa chữa.
+Dự án sử dụng ba thuật toán hồi quy:
 
-\- Tình trạng bảo hành.
+1. **Linear Regression** – Hồi quy tuyến tính.
+2. **Decision Tree Regression** – Cây quyết định hồi quy.
+3. **Random Forest Regression** – Rừng ngẫu nhiên hồi quy.
 
-\- Nhu cầu thị trường.
+Random Forest Regression được chọn làm mô hình mặc định do đạt kết quả tốt nhất trên tập kiểm tra trong lần huấn luyện hiện tại.
 
-
-
-\*\*Lưu ý:\*\* Đơn vị giá được giữ theo dữ liệu gốc, không tự quy đổi thành VND khi chưa xác định được đơn vị của bộ dữ liệu.
-
-
-
-## 5. Cấu trúc dự án
-
-
+## 6. Cấu trúc dự án
 
 ```text
-
-UsedPhonePrice/
-
+PhoneValueAI_Package/
 │
-
 ├── app/
-
 │   ├── main.py
-
 │   ├── database.py
-
 │   └── pages/
-
-│       ├── 1\_Dinh\_gia.py
-
-│       ├── 2\_Phan\_tich.py
-
-│       ├── 3\_Lich\_su.py
-
-│       └── 4\_Thong\_tin\_mo\_hinh.py
-
+│       ├── 1_Dinh_gia.py
+│       ├── 2_Phan_tich.py
+│       ├── 3_Lich_su.py
+│       └── 4_Thong_tin_mo_hinh.py
 │
-
 ├── data/
-
 │   ├── raw/
-
-│   │   └── used\_phone\_price\_prediction\_1M.csv
-
+│   │   └── used_phone_price_prediction_1M.csv.gz
 │   └── processed/
-
-│       └── feature\_importance.csv
-
+│       └── feature_importance.csv
 │
-
 ├── models/
-
-│   ├── best\_model.pkl
-
-│   └── model\_metadata.json
-
+│   ├── linear_regression.pkl
+│   ├── decision_tree_regression.pkl
+│   ├── random_forest_regression.pkl
+│   └── model_metadata.json
 │
-
+├── notebooks/
+│
 ├── reports/
-
-│   ├── data\_summary.json
-
-│   ├── feature\_importance.png
-
-│   ├── missing\_values.csv
-
-│   └── numeric\_summary.csv
-
+│   ├── data_summary.json
+│   ├── feature_importance.png
+│   ├── missing_values.csv
+│   ├── numeric_summary.csv
+│   ├── model_overfitting_evaluation.csv
+│   ├── resale_price_greater_than_original.csv
+│   └── test_training_all_results.csv
 │
-
 ├── src/
-
-│   ├── inspect\_data.py
-
+│   ├── inspect_data.py
 │   ├── preprocessing.py
-
 │   ├── train.py
-
 │   ├── predict.py
-
 │   ├── evaluate.py
-
-│   └── feature\_importance.py
-
+│   ├── feature_importance.py
+│   ├── test_all_predictions.py
+│   ├── test_training.py
+│   └── test_training_all.py
 │
-
+├── .gitignore
 ├── requirements.txt
-
 └── README.md
-
 ```
 
+Ngoài ra, ứng dụng có thể tạo file `phonevalue_history.db` để lưu lịch sử định giá trên máy chạy ứng dụng. File database này không được đưa lên GitHub.
 
-
-## 6. Cài đặt dự án
-
-
+## 7. Cài đặt dự án
 
 ### Bước 1: Cài đặt Python
 
-
-
 Khuyến nghị sử dụng Python 3.13.7.
 
+Kiểm tra phiên bản:
 
+```powershell
+python --version
+```
 
 ### Bước 2: Tạo môi trường ảo
 
-
-
 ```powershell
-
 python -m venv .venv
-
 ```
-
-
 
 ### Bước 3: Kích hoạt môi trường ảo
 
-
-
 Windows PowerShell:
 
-
-
 ```powershell
-
-.\\.venv\\Scripts\\Activate.ps1
-
+.\.venv\Scripts\Activate.ps1
 ```
 
-
-
-Nếu bị chặn quyền chạy script:
-
-
+Nếu PowerShell chặn thực thi script:
 
 ```powershell
-
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-
-.\\.venv\\Scripts\\Activate.ps1
-
+.\.venv\Scripts\Activate.ps1
 ```
-
-
 
 ### Bước 4: Cài đặt thư viện
 
-
-
 ```powershell
-
 pip install -r requirements.txt
-
 ```
-
-
 
 ### Bước 5: Kiểm tra thư viện
 
-
-
 ```powershell
-
 pip check
-
 ```
 
+## 8. Huấn luyện mô hình
 
-
-## 7. Huấn luyện mô hình
-
-
-
-Đảm bảo bộ dữ liệu đã nằm tại:
-
-
+Đảm bảo dataset nằm đúng vị trí:
 
 ```text
-
-data/raw/used\_phone\_price\_prediction\_1M.csv
-
+data/raw/used_phone_price_prediction_1M.csv.gz
 ```
-
-
 
 Chạy lệnh:
 
-
-
 ```powershell
-
 python src/train.py
-
 ```
 
+Sau khi huấn luyện thành công, các mô hình và metadata được lưu trong thư mục `models/`.
 
+Các file mô hình:
 
-Sau khi huấn luyện thành công, mô hình và thông tin đánh giá được lưu trong thư mục `models/`.
+- `linear_regression.pkl`
+- `decision_tree_regression.pkl`
+- `random_forest_regression.pkl`
+- `model_metadata.json`
 
+Lưu ý: Huấn luyện trên toàn bộ 1.000.000 dòng có thể mất nhiều thời gian và cần đủ bộ nhớ.
 
-
-## 8. Dự đoán giá điện thoại
-
-
+## 9. Dự đoán giá điện thoại
 
 Chạy chương trình kiểm tra dự đoán:
 
-
-
 ```powershell
-
 python src/predict.py
-
 ```
 
+Ứng dụng sử dụng các mô hình đã huấn luyện để dự đoán giá bán lại dựa trên thông tin điện thoại đầu vào.
 
-
-## 9. Đánh giá mô hình
-
-
+## 10. Đánh giá mô hình
 
 Chạy:
 
-
-
 ```powershell
-
 python src/evaluate.py
-
 ```
-
-
 
 Các chỉ số đánh giá:
 
+- **MAE (Mean Absolute Error):** Sai số tuyệt đối trung bình giữa giá trị dự đoán và giá trị thực tế.
+- **RMSE (Root Mean Squared Error):** Căn bậc hai của sai số bình phương trung bình, nhạy hơn với các sai số lớn.
+- **R² (R-squared):** Hệ số xác định, phản ánh mức độ giải thích biến thiên của dữ liệu.
 
-
-\- MAE: Sai số tuyệt đối trung bình.
-
-\- RMSE: Căn bậc hai của sai số bình phương trung bình.
-
-\- R²: Hệ số xác định, phản ánh mức độ giải thích biến thiên của dữ liệu.
-
-
-
-## 10. Phân tích độ quan trọng đặc trưng
-
-
+## 11. Phân tích độ quan trọng đặc trưng
 
 Chạy:
 
-
-
 ```powershell
-
-python src/feature\_importance.py
-
+python src/feature_importance.py
 ```
 
-
-
-Kết quả được lưu tại:
-
-
+Kết quả phân tích được lưu tại:
 
 ```text
-
-data/processed/feature\_importance.csv
-
-reports/feature\_importance.png
-
+data/processed/feature_importance.csv
+reports/feature_importance.png
 ```
 
+Một số đặc trưng có ảnh hưởng đáng kể trong kết quả phân tích hiện tại:
 
+1. Giá mua ban đầu (`original_price`).
+2. Tuổi đời thiết bị (`age_months`).
+3. Điểm nhu cầu thị trường (`market_demand_score`).
+4. Tình trạng pin (`battery_health`).
+5. Tình trạng thiết bị (`condition`).
 
-## 11. Khởi chạy ứng dụng
+## 12. Khởi chạy ứng dụng
 
-
-
-Tại thư mục gốc của dự án, chạy:
-
-
+Tại thư mục gốc dự án, chạy:
 
 ```powershell
-
-streamlit run app/main.py
-
+streamlit run app/main.py --server.port 8502
 ```
 
-
-
-Sau đó mở địa chỉ Local URL mà Streamlit hiển thị trên terminal, thông thường là:
-
-
+Sau khi khởi chạy thành công, mở trình duyệt tại:
 
 ```text
-
-http://localhost:8501
-
+http://localhost:8502
 ```
 
+## 13. Các chức năng chính
 
+### 13.1. Định giá điện thoại
 
-## 12. Các chức năng chính
+- Nhập thông tin điện thoại.
+- Chọn mô hình Machine Learning để dự đoán.
+- Hiển thị giá bán lại dự đoán theo VND.
+- So sánh giá mua ban đầu và giá dự đoán.
+- Lưu kết quả vào lịch sử định giá.
 
+### 13.2. Phân tích dữ liệu
 
+- Thống kê tổng quan dataset.
+- Phân tích giá điện thoại.
+- Phân tích theo thương hiệu và các thuộc tính.
+- Hiển thị biểu đồ trực quan.
+- Hỗ trợ xuất dữ liệu phân tích.
 
-### 12.1. Định giá điện thoại
+### 13.3. Lịch sử định giá
 
+- Xem các lần định giá trước đó.
+- Tìm kiếm và lọc lịch sử.
+- Xem chi tiết từng lần định giá.
+- Xuất dữ liệu lịch sử.
+- Xóa một bản ghi hoặc xóa toàn bộ lịch sử.
 
+### 13.4. Thông tin mô hình
 
-\- Nhập thông tin điện thoại.
+- Hiển thị ba thuật toán Machine Learning.
+- So sánh các chỉ số MAE, RMSE và R².
+- Hiển thị mô hình mặc định.
+- Trình bày thông tin huấn luyện và các file mô hình.
 
-\- Dự đoán giá bán lại bằng mô hình Machine Learning.
+## 14. Kết quả huấn luyện mô hình
 
-\- Hiển thị kết quả định giá.
+Các mô hình được huấn luyện và đánh giá trên dataset gồm 1.000.000 dòng:
 
-\- Lưu kết quả vào lịch sử.
+- Tập huấn luyện: 800.000 dòng.
+- Tập kiểm tra: 200.000 dòng.
+- Số đặc trưng đầu vào: 27.
 
+Kết quả đánh giá:
 
+| Mô hình | MAE (VND) | RMSE (VND) | R² |
+|---|---:|---:|---:|
+| Linear Regression | 4.794.880 | 6.825.660 | 0,833181 |
+| Decision Tree Regression | 3.199.630 | 4.325.120 | 0,933019 |
+| Random Forest Regression | 2.755.620 | 3.728.630 | 0,950220 |
 
-### 12.2. Phân tích dữ liệu
+*MAE và RMSE trong bảng đã được quy đổi từ đơn vị nghìn VND sang VND.*
 
+### Nhận xét
 
+- Linear Regression có kết quả thấp hơn hai mô hình còn lại trong lần đánh giá này.
+- Decision Tree Regression cải thiện đáng kể khả năng dự đoán.
+- Random Forest Regression đạt MAE và RMSE thấp nhất, đồng thời có R² cao nhất.
+- Vì vậy, Random Forest Regression được chọn làm mô hình mặc định của ứng dụng.
 
-\- Thống kê dữ liệu điện thoại.
+## 15. Kết luận
 
-\- Phân tích các thuộc tính.
+PhoneValue AI là dự án ứng dụng Machine Learning vào bài toán dự đoán giá bán lại điện thoại đã qua sử dụng.
 
-\- Trực quan hóa dữ liệu bằng biểu đồ.
+Dự án kết hợp các bước xử lý dữ liệu, huấn luyện và so sánh mô hình, đánh giá hiệu suất, phân tích đặc trưng, trực quan hóa dữ liệu và xây dựng ứng dụng web bằng Streamlit.
 
+Thông qua ba thuật toán hồi quy, dự án hướng đến việc cung cấp công cụ tham khảo giá điện thoại cũ trực quan và thuận tiện cho người dùng.
 
+---
 
-### 12.3. Lịch sử định giá
-
-
-
-\- Xem các lần định giá trước đó.
-
-\- Tìm kiếm và lọc lịch sử.
-
-\- Xuất dữ liệu lịch sử.
-
-\- Xóa bản ghi hoặc xóa toàn bộ lịch sử.
-
-
-
-### 12.4. Thông tin mô hình
-
-
-
-\- Hiển thị thuật toán Machine Learning.
-
-\- Hiển thị các chỉ số đánh giá.
-
-\- Hiển thị độ quan trọng của đặc trưng.
-
-\- Cung cấp thông tin về quá trình huấn luyện.
-
-
-
-## 13. Kết quả đánh giá mô hình
-
-
-
-Mô hình HistGradientBoostingRegressor được đánh giá trên tập kiểm tra gồm 200.000 dòng.
-
-
-
-Kết quả huấn luyện đã ghi nhận:
-
-
-
-| Chỉ số | Giá trị |
-
-|---|---:|
-
-| MAE | 1.801,63 |
-
-| RMSE | 2.297,59 |
-
-| R² | 0,9811 |
-
-| Số dòng huấn luyện | 800.000 |
-
-| Số dòng kiểm tra | 200.000 |
-
-| Số đặc trưng | 27 |
-
-
-
-Kết quả kiểm tra bổ sung trên mẫu 20.000 dòng:
-
-
-
-| Chỉ số | Tập huấn luyện | Tập kiểm tra |
-
-|---|---:|---:|
-
-| MAE | 1.783,51 | 1.807,77 |
-
-| RMSE | 2.266,58 | 2.294,56 |
-
-| R² | 0,9818 | 0,9813 |
-
-
-
-Các chỉ số trên cho thấy hiệu suất giữa hai tập khá gần nhau trong lần đánh giá mẫu này.
-
-
-
-## 14. Kết luận
-
-
-
-PhoneValue AI là ứng dụng minh họa việc áp dụng Machine Learning vào bài toán dự đoán giá bán lại điện thoại đã qua sử dụng.
-
-
-
-Dự án kết hợp xử lý dữ liệu, huấn luyện mô hình, đánh giá hiệu suất, trực quan hóa và xây dựng ứng dụng web bằng Streamlit.
-
-
-
-
+**PhoneValue AI – Used Phone Price Prediction with Machine Learning.**

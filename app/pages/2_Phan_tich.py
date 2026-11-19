@@ -6,10 +6,10 @@ from pathlib import Path
 
 
 # =====================================================
-# 1. CẤU HÌNH
+# 1. CAU HINH
 # =====================================================
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 DATA_PATH = (
     ROOT_DIR
@@ -18,20 +18,76 @@ DATA_PATH = (
     / "used_phone_price_prediction_1M.csv.gz"
 )
 
-st.title("📊 Phân tích dữ liệu")
-st.caption(
-    "Khám phá dữ liệu điện thoại và các yếu tố ảnh hưởng "
-    "đến giá bán lại."
+# Dataset lưu giá theo đơn vị nghìn đồng.
+# 1 đơn vị dataset = 1.000 VND.
+PRICE_SCALE = 1000
+
+
+def format_vnd(value):
+    """Định dạng giá tiền theo VND."""
+    if pd.isna(value):
+        return "N/A"
+    return f"{value:,.0f} ₫"
+
+
+def add_vnd_columns(data):
+    """Tạo các cột giá VND, không thay đổi dữ liệu gốc."""
+    result = data.copy()
+
+    result["original_price_vnd"] = (
+        result["original_price"] * PRICE_SCALE
+    )
+
+    result["resale_price_vnd"] = (
+        result["resale_price"] * PRICE_SCALE
+    )
+
+    return result
+
+
+# =====================================================
+# 2. CSS
+# =====================================================
+
+st.markdown(
+    """
+    <style>
+    .main-title {
+        font-size: 34px;
+        font-weight: 800;
+        color: #1976D2;
+        margin-bottom: 5px;
+    }
+
+    .sub-title {
+        color: #777;
+        font-size: 15px;
+        margin-bottom: 25px;
+    }
+
+    .section-title {
+        font-size: 22px;
+        font-weight: 700;
+        margin-top: 25px;
+        margin-bottom: 12px;
+    }
+
+    div[data-testid="stMetric"] {
+        background-color: rgba(128, 128, 128, 0.08);
+        padding: 15px;
+        border-radius: 12px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
-st.divider()
-
 
 # =====================================================
-# 2. ĐỌC DỮ LIỆU
+# 3. DOC DU LIEU
 # =====================================================
 
-@st.cache_data(show_spinner="Đang tải dữ liệu...")
+@st.cache_data(show_spinner="Đang tải dữ liệu 1 triệu điện thoại...")
 def load_data():
 
     if not DATA_PATH.exists():
@@ -39,37 +95,65 @@ def load_data():
             f"Không tìm thấy dataset: {DATA_PATH}"
         )
 
-    df = pd.read_csv(
-        DATA_PATH,
-        low_memory=False,
-    )
-
     required_columns = [
         "brand",
         "model",
         "release_year",
         "ram_gb",
         "storage_gb",
-        "original_price",
-        "resale_price",
-        "condition",
-        "os_type",
-        "age_months",
-        "battery_health",
         "screen_size_inches",
         "battery_capacity",
+        "processor_score",
+        "camera_score",
+        "os_type",
+        "has_5g",
+        "original_price",
+        "purchase_year",
+        "age_months",
+        "usage_hours_per_day",
+        "condition",
+        "battery_health",
+        "screen_cracked",
+        "body_damage",
+        "repair_history",
+        "water_damage",
+        "city_tier",
+        "seller_type",
+        "warranty_remaining_months",
+        "box_available",
+        "charger_available",
+        "market_demand_score",
+        "resale_price",
     ]
 
-    missing_columns = [
-        col
-        for col in required_columns
-        if col not in df.columns
+    df = pd.read_csv(
+        DATA_PATH,
+        compression="gzip",
+        usecols=required_columns
+    )
+
+    numeric_columns = [
+        "release_year",
+        "ram_gb",
+        "storage_gb",
+        "screen_size_inches",
+        "battery_capacity",
+        "processor_score",
+        "camera_score",
+        "original_price",
+        "purchase_year",
+        "age_months",
+        "usage_hours_per_day",
+        "battery_health",
+        "warranty_remaining_months",
+        "market_demand_score",
+        "resale_price",
     ]
 
-    if missing_columns:
-        raise ValueError(
-            "Dataset thiếu các cột: "
-            + ", ".join(missing_columns)
+    for column in numeric_columns:
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce"
         )
 
     return df
@@ -84,52 +168,63 @@ except Exception as error:
 
 
 # =====================================================
-# 3. KIỂM TRA VÀ CHUẨN BỊ DỮ LIỆU
+# 4. TIEU DE
+# =====================================================
+
+st.markdown(
+    '<div class="main-title">📊 PHÂN TÍCH DỮ LIỆU ĐIỆN THOẠI</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="sub-title">'
+    'Khám phá dữ liệu, xu hướng giá và các yếu tố ảnh hưởng '
+    'đến giá bán lại điện thoại.'
+    '</div>',
+    unsafe_allow_html=True
+)
+
+st.info(
+    "Đơn vị giá hiển thị: VND (₫). "
+    "Dataset gốc lưu giá theo nghìn đồng, "
+    "hệ thống tự động quy đổi khi hiển thị."
+)
+
+
+# =====================================================
+# 5. TONG QUAN DU LIEU
 # =====================================================
 
 total_rows = len(df)
+total_columns = len(df.columns)
+missing_count = int(df.isna().sum().sum())
+duplicate_count = int(df.duplicated().sum())
 
-missing_count = int(
-    df.isna().sum().sum()
-)
+col1, col2, col3, col4 = st.columns(4)
 
-duplicate_count = int(
-    df.duplicated().sum()
-)
+col1.metric("Tổng số điện thoại", f"{total_rows:,}")
+col2.metric("Tổng số thuộc tính", f"{total_columns}")
+col3.metric("Giá trị bị thiếu", f"{missing_count:,}")
+col4.metric("Dữ liệu trùng lặp", f"{duplicate_count:,}")
 
-df["resale_price"] = pd.to_numeric(
-    df["resale_price"],
-    errors="coerce",
-)
-
-df["original_price"] = pd.to_numeric(
-    df["original_price"],
-    errors="coerce",
-)
-
-df["age_months"] = pd.to_numeric(
-    df["age_months"],
-    errors="coerce",
-)
-
-df["battery_health"] = pd.to_numeric(
-    df["battery_health"],
-    errors="coerce",
+st.caption(
+    f"Dataset gồm {total_columns - 1} thuộc tính đầu vào "
+    f"(Features) và 1 biến mục tiêu (Target: resale_price)."
 )
 
 
 # =====================================================
-# 4. BỘ LỌC
+# 6. BO LOC DU LIEU
 # =====================================================
 
-st.subheader("🔎 Bộ lọc dữ liệu")
+st.markdown(
+    '<div class="section-title">🔎 Bộ lọc dữ liệu</div>',
+    unsafe_allow_html=True
+)
 
-with st.expander(
-    "Mở bộ lọc phân tích",
-    expanded=True,
-):
+with st.expander("Mở bộ lọc dữ liệu", expanded=True):
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
 
@@ -140,7 +235,7 @@ with st.expander(
         selected_brands = st.multiselect(
             "Thương hiệu",
             options=brands,
-            default=brands,
+            default=brands
         )
 
         conditions = sorted(
@@ -148,81 +243,73 @@ with st.expander(
         )
 
         selected_conditions = st.multiselect(
-            "Tình trạng",
+            "Tình trạng điện thoại",
             options=conditions,
-            default=conditions,
+            default=conditions
         )
 
     with col2:
 
-        os_types = sorted(
+        operating_systems = sorted(
             df["os_type"].dropna().unique().tolist()
         )
 
         selected_os = st.multiselect(
             "Hệ điều hành",
-            options=os_types,
-            default=os_types,
+            options=operating_systems,
+            default=operating_systems
         )
 
-        years = sorted(
-            df["release_year"].dropna().unique().tolist()
+        city_tiers = sorted(
+            df["city_tier"].dropna().unique().tolist()
         )
 
-        if years:
+        selected_city_tiers = st.multiselect(
+            "Phân loại khu vực",
+            options=city_tiers,
+            default=city_tiers
+        )
 
-            selected_years = st.slider(
-                "Khoảng năm ra mắt",
-                min_value=int(min(years)),
-                max_value=int(max(years)),
-                value=(
-                    int(min(years)),
-                    int(max(years)),
-                ),
-            )
+    with col3:
 
-        else:
-            selected_years = None
+        min_year = int(df["release_year"].min())
+        max_year = int(df["release_year"].max())
 
+        selected_years = st.slider(
+            "Năm phát hành",
+            min_value=min_year,
+            max_value=max_year,
+            value=(min_year, max_year)
+        )
 
-    price_min = float(
-        df["resale_price"].min()
-    )
+        valid_prices = df["resale_price"].dropna()
 
-    price_max = float(
-        df["resale_price"].max()
-    )
+        if valid_prices.empty:
+            st.error("Dataset không có dữ liệu giá bán lại hợp lệ.")
+            st.stop()
 
-    if pd.isna(price_min) or pd.isna(price_max):
-        st.error("Không có dữ liệu giá bán lại hợp lệ.")
-        st.stop()
+        min_price_vnd = float(
+            valid_prices.min() * PRICE_SCALE
+        )
 
-    selected_price = st.slider(
-        "Khoảng giá bán lại",
-        min_value=price_min,
-        max_value=price_max,
-        value=(price_min, price_max),
-    )
+        max_price_vnd = float(
+            valid_prices.max() * PRICE_SCALE
+        )
+
+        selected_prices_vnd = st.slider(
+            "Khoảng giá bán lại (VND)",
+            min_value=min_price_vnd,
+            max_value=max_price_vnd,
+            value=(min_price_vnd, max_price_vnd),
+            format="%.0f ₫"
+        )
 
 
 # =====================================================
-# 5. ÁP DỤNG BỘ LỌC
+# 7. AP DUNG BO LOC
 # =====================================================
 
 filtered_df = df.copy()
-
-if not selected_brands:
-    st.warning("Vui lòng chọn ít nhất một thương hiệu.")
-    st.stop()
-
-if not selected_conditions:
-    st.warning("Vui lòng chọn ít nhất một tình trạng.")
-    st.stop()
-
-if not selected_os:
-    st.warning("Vui lòng chọn ít nhất một hệ điều hành.")
-    st.stop()
-
 
 filtered_df = filtered_df[
     filtered_df["brand"].isin(selected_brands)
@@ -236,158 +323,128 @@ filtered_df = filtered_df[
     filtered_df["os_type"].isin(selected_os)
 ]
 
-if selected_years is not None:
-
-    filtered_df = filtered_df[
-        filtered_df["release_year"].between(
-            selected_years[0],
-            selected_years[1],
-        )
-    ]
+filtered_df = filtered_df[
+    filtered_df["city_tier"].isin(selected_city_tiers)
+]
 
 filtered_df = filtered_df[
+    filtered_df["release_year"].between(
+        selected_years[0],
+        selected_years[1]
+    )
+]
+
+# Chuyển khoảng giá VND về đơn vị dataset để lọc.
+filtered_df = filtered_df[
     filtered_df["resale_price"].between(
-        selected_price[0],
-        selected_price[1],
+        selected_prices_vnd[0] / PRICE_SCALE,
+        selected_prices_vnd[1] / PRICE_SCALE
     )
 ]
 
 if filtered_df.empty:
-    st.warning(
-        "Không tìm thấy dữ liệu phù hợp với bộ lọc."
-    )
+    st.warning("Không có dữ liệu phù hợp với bộ lọc.")
     st.stop()
 
+st.success(
+    f"Tìm thấy {len(filtered_df):,} điện thoại phù hợp."
+)
 
-# =====================================================
-# 6. THỐNG KÊ TỔNG QUAN
-# =====================================================
-
-st.divider()
-
-st.subheader("📌 Tổng quan dữ liệu")
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric(
-        "Tổng bản ghi",
-        f"{len(filtered_df):,}",
-    )
-
-with col2:
-    st.metric(
-        "Giá bán lại trung bình",
-        f"{filtered_df['resale_price'].mean():,.2f}",
-    )
-
-with col3:
-    st.metric(
-        "Giá bán lại cao nhất",
-        f"{filtered_df['resale_price'].max():,.2f}",
-    )
-
-with col4:
-    st.metric(
-        "Giá bán lại thấp nhất",
-        f"{filtered_df['resale_price'].min():,.2f}",
-    )
+# Tạo dữ liệu phục vụ hiển thị và biểu đồ.
+# Không ghi đè dữ liệu gốc.
+display_df = add_vnd_columns(filtered_df)
 
 
 # =====================================================
-# 7. PHÂN PHỐI GIÁ BÁN LẠI
+# 8. THONG KE GIA BAN LAI
 # =====================================================
 
-st.divider()
+st.markdown(
+    '<div class="section-title">💰 Thống kê giá bán lại</div>',
+    unsafe_allow_html=True
+)
 
-st.subheader("📈 Phân phối giá bán lại")
+price_col1, price_col2, price_col3, price_col4 = st.columns(4)
 
-fig_hist = px.histogram(
-    filtered_df,
-    x="resale_price",
+average_price = display_df["resale_price_vnd"].mean()
+median_price = display_df["resale_price_vnd"].median()
+min_price = display_df["resale_price_vnd"].min()
+max_price = display_df["resale_price_vnd"].max()
+
+price_col1.metric(
+    "Giá trung bình",
+    format_vnd(average_price)
+)
+
+price_col2.metric(
+    "Giá trung vị",
+    format_vnd(median_price)
+)
+
+price_col3.metric(
+    "Giá thấp nhất",
+    format_vnd(min_price)
+)
+
+price_col4.metric(
+    "Giá cao nhất",
+    format_vnd(max_price)
+)
+
+
+# =====================================================
+# 9. PHAN PHOI GIA
+# =====================================================
+
+st.markdown(
+    '<div class="section-title">📈 Phân phối giá điện thoại</div>',
+    unsafe_allow_html=True
+)
+
+fig_price = px.histogram(
+    display_df,
+    x="resale_price_vnd",
     nbins=50,
     title="Phân phối giá bán lại điện thoại",
     labels={
-        "resale_price": "Giá bán lại",
-        "count": "Số lượng",
+        "resale_price_vnd": "Giá bán lại (VND)",
+        "count": "Số lượng điện thoại"
     },
-    color_discrete_sequence=["#2878B5"],
+    template="plotly_white"
 )
 
-fig_hist.update_layout(
-    template="plotly_white",
-    xaxis_title="Giá bán lại",
-    yaxis_title="Số lượng điện thoại",
+fig_price.update_layout(
+    xaxis_title="Giá bán lại (VND)",
+    yaxis_title="Số lượng",
+    bargap=0.08
 )
 
 st.plotly_chart(
-    fig_hist,
-    use_container_width=True,
+    fig_price,
+    use_container_width=True
 )
 
 
 # =====================================================
-# 8. SO SÁNH GIÁ THEO THƯƠNG HIỆU
+# 10. PHAN TICH THUONG HIEU
 # =====================================================
 
-st.divider()
-
-st.subheader("🏷️ So sánh giá theo thương hiệu")
+st.markdown(
+    '<div class="section-title">📱 Phân tích theo thương hiệu</div>',
+    unsafe_allow_html=True
+)
 
 brand_analysis = (
-    filtered_df
+    display_df
     .groupby("brand", as_index=False)
     .agg(
-        average_price=("resale_price", "mean"),
-        median_price=("resale_price", "median"),
-        phone_count=("resale_price", "count"),
+        average_price_vnd=("resale_price_vnd", "mean"),
+        median_price_vnd=("resale_price_vnd", "median"),
+        phone_count=("resale_price_vnd", "count")
     )
-)
-
-fig_brand = px.bar(
-    brand_analysis,
-    x="brand",
-    y="average_price",
-    color="brand",
-    text_auto=".2f",
-    title="Giá bán lại trung bình theo thương hiệu",
-    labels={
-        "brand": "Thương hiệu",
-        "average_price": "Giá bán lại trung bình",
-    },
-)
-
-fig_brand.update_layout(
-    template="plotly_white",
-    showlegend=False,
-)
-
-st.plotly_chart(
-    fig_brand,
-    use_container_width=True,
-)
-
-st.dataframe(
-    brand_analysis,
-    use_container_width=True,
-    hide_index=True,
-)
-
-
-# =====================================================
-# 9. PHÂN TÍCH TÌNH TRẠNG ĐIỆN THOẠI
-# =====================================================
-
-st.divider()
-
-st.subheader("📱 Phân tích tình trạng điện thoại")
-
-condition_analysis = (
-    filtered_df
-    .groupby("condition", as_index=False)
-    .agg(
-        average_price=("resale_price", "mean"),
-        phone_count=("resale_price", "count"),
+    .sort_values(
+        "average_price_vnd",
+        ascending=False
     )
 )
 
@@ -395,26 +452,108 @@ col1, col2 = st.columns(2)
 
 with col1:
 
-    fig_condition = px.bar(
-        condition_analysis,
-        x="condition",
-        y="phone_count",
-        color="condition",
-        title="Số lượng theo tình trạng",
+    fig_brand_price = px.bar(
+        brand_analysis,
+        x="brand",
+        y="average_price_vnd",
+        title="Giá bán lại trung bình theo thương hiệu",
         labels={
-            "condition": "Tình trạng",
-            "phone_count": "Số lượng",
+            "brand": "Thương hiệu",
+            "average_price_vnd": "Giá trung bình (VND)"
         },
-    )
-
-    fig_condition.update_layout(
-        template="plotly_white",
-        showlegend=False,
+        text_auto=".3s",
+        template="plotly_white"
     )
 
     st.plotly_chart(
-        fig_condition,
-        use_container_width=True,
+        fig_brand_price,
+        use_container_width=True
+    )
+
+with col2:
+
+    fig_brand_count = px.bar(
+        brand_analysis,
+        x="brand",
+        y="phone_count",
+        title="Số lượng điện thoại theo thương hiệu",
+        labels={
+            "brand": "Thương hiệu",
+            "phone_count": "Số lượng"
+        },
+        text_auto=True,
+        template="plotly_white"
+    )
+
+    st.plotly_chart(
+        fig_brand_count,
+        use_container_width=True
+    )
+
+brand_table = brand_analysis.copy()
+
+brand_table["Giá trung bình (VND)"] = (
+    brand_table["average_price_vnd"].apply(format_vnd)
+)
+
+brand_table["Giá trung vị (VND)"] = (
+    brand_table["median_price_vnd"].apply(format_vnd)
+)
+
+brand_table = brand_table[
+    [
+        "brand",
+        "Giá trung bình (VND)",
+        "Giá trung vị (VND)",
+        "phone_count"
+    ]
+].rename(
+    columns={
+        "brand": "Thương hiệu",
+        "phone_count": "Số lượng điện thoại"
+    }
+)
+
+st.dataframe(
+    brand_table,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =====================================================
+# 11. PHAN TICH TINH TRANG
+# =====================================================
+
+st.markdown(
+    '<div class="section-title">🔧 Phân tích theo tình trạng</div>',
+    unsafe_allow_html=True
+)
+
+condition_analysis = (
+    display_df
+    .groupby("condition", as_index=False)
+    .agg(
+        average_price_vnd=("resale_price_vnd", "mean"),
+        phone_count=("resale_price_vnd", "count")
+    )
+)
+
+col1, col2 = st.columns(2)
+
+with col1:
+
+    fig_condition_count = px.pie(
+        condition_analysis,
+        names="condition",
+        values="phone_count",
+        title="Tỷ lệ điện thoại theo tình trạng",
+        hole=0.4
+    )
+
+    st.plotly_chart(
+        fig_condition_count,
+        use_container_width=True
     )
 
 with col2:
@@ -422,314 +561,599 @@ with col2:
     fig_condition_price = px.bar(
         condition_analysis,
         x="condition",
-        y="average_price",
-        color="condition",
+        y="average_price_vnd",
         title="Giá trung bình theo tình trạng",
         labels={
             "condition": "Tình trạng",
-            "average_price": "Giá trung bình",
+            "average_price_vnd": "Giá trung bình (VND)"
         },
-    )
-
-    fig_condition_price.update_layout(
-        template="plotly_white",
-        showlegend=False,
+        text_auto=".3s",
+        template="plotly_white"
     )
 
     st.plotly_chart(
         fig_condition_price,
-        use_container_width=True,
+        use_container_width=True
     )
 
 
 # =====================================================
-# 10. GIÁ GỐC VÀ GIÁ BÁN LẠI
+# 12. GIA GOC VA GIA BAN LAI
 # =====================================================
 
-st.divider()
+st.markdown(
+    '<div class="section-title">💵 Giá gốc và giá bán lại</div>',
+    unsafe_allow_html=True
+)
 
-st.subheader("💰 So sánh giá mua ban đầu và giá bán lại")
+price_scatter_df = display_df.dropna(
+    subset=["original_price_vnd", "resale_price_vnd"]
+)
 
-scatter_df = filtered_df[
-    [
-        "original_price",
-        "resale_price",
-        "brand",
-        "condition",
-    ]
-].dropna()
+if not price_scatter_df.empty:
 
-if len(scatter_df) > 5000:
-
-    scatter_df = scatter_df.sample(
-        n=5000,
-        random_state=42,
+    price_scatter_df = price_scatter_df.sample(
+        n=min(5000, len(price_scatter_df)),
+        random_state=42
     )
 
-fig_scatter = px.scatter(
-    scatter_df,
-    x="original_price",
-    y="resale_price",
-    color="brand",
-    symbol="condition",
-    title="Mối quan hệ giữa giá mua và giá bán lại",
-    labels={
-        "original_price": "Giá mua ban đầu",
-        "resale_price": "Giá bán lại",
-        "brand": "Thương hiệu",
-        "condition": "Tình trạng",
-    },
-)
+    fig_price_relation = px.scatter(
+        price_scatter_df,
+        x="original_price_vnd",
+        y="resale_price_vnd",
+        color="brand",
+        title="Mối quan hệ giữa giá gốc và giá bán lại",
+        labels={
+            "original_price_vnd": "Giá gốc (VND)",
+            "resale_price_vnd": "Giá bán lại (VND)",
+            "brand": "Thương hiệu"
+        },
+        template="plotly_white",
+        opacity=0.6
+    )
 
-fig_scatter.update_layout(
-    template="plotly_white",
-)
-
-st.plotly_chart(
-    fig_scatter,
-    use_container_width=True,
-)
+    st.plotly_chart(
+        fig_price_relation,
+        use_container_width=True
+    )
 
 
 # =====================================================
-# 11. PHÂN TÍCH TUỔI ĐIỆN THOẠI
+# 13. TUOI DOI DIEN THOAI
 # =====================================================
 
-st.divider()
-
-st.subheader("⏳ Ảnh hưởng của tuổi điện thoại")
+st.markdown(
+    '<div class="section-title">📅 Tuổi đời điện thoại</div>',
+    unsafe_allow_html=True
+)
 
 age_analysis = (
-    filtered_df
+    display_df
+    .dropna(subset=["age_months", "resale_price_vnd"])
     .groupby("age_months", as_index=False)
     .agg(
-        average_price=("resale_price", "mean"),
-        phone_count=("resale_price", "count"),
+        average_price_vnd=("resale_price_vnd", "mean")
     )
     .sort_values("age_months")
 )
 
-fig_age = px.line(
-    age_analysis,
-    x="age_months",
-    y="average_price",
-    markers=True,
-    title="Giá bán lại trung bình theo tuổi điện thoại",
-    labels={
-        "age_months": "Tuổi điện thoại (tháng)",
-        "average_price": "Giá bán lại trung bình",
-    },
-)
+if not age_analysis.empty:
 
-fig_age.update_layout(
-    template="plotly_white",
-)
+    fig_age = px.line(
+        age_analysis,
+        x="age_months",
+        y="average_price_vnd",
+        markers=True,
+        title="Mối quan hệ giữa tuổi đời và giá bán lại",
+        labels={
+            "age_months": "Tuổi đời (tháng)",
+            "average_price_vnd": "Giá bán lại trung bình (VND)"
+        },
+        template="plotly_white"
+    )
 
-st.plotly_chart(
-    fig_age,
-    use_container_width=True,
-)
+    st.plotly_chart(
+        fig_age,
+        use_container_width=True
+    )
 
 
 # =====================================================
-# 12. PHÂN TÍCH RAM VÀ BỘ NHỚ
+# 14. RAM VA BO NHO
 # =====================================================
 
-st.divider()
+st.markdown(
+    '<div class="section-title">🧠 Phân tích RAM và bộ nhớ</div>',
+    unsafe_allow_html=True
+)
 
-st.subheader("🧠 Phân tích RAM và bộ nhớ trong")
+ram_analysis = (
+    display_df
+    .dropna(subset=["ram_gb"])
+    .groupby("ram_gb", as_index=False)
+    .agg(
+        average_price_vnd=("resale_price_vnd", "mean"),
+        phone_count=("resale_price_vnd", "count")
+    )
+    .sort_values("ram_gb")
+)
+
+storage_analysis = (
+    display_df
+    .dropna(subset=["storage_gb"])
+    .groupby("storage_gb", as_index=False)
+    .agg(
+        average_price_vnd=("resale_price_vnd", "mean"),
+        phone_count=("resale_price_vnd", "count")
+    )
+    .sort_values("storage_gb")
+)
 
 col1, col2 = st.columns(2)
 
 with col1:
 
-    ram_analysis = (
-        filtered_df
-        .groupby("ram_gb", as_index=False)
-        .agg(
-            average_price=("resale_price", "mean"),
-            phone_count=("resale_price", "count"),
-        )
-        .sort_values("ram_gb")
-    )
-
     fig_ram = px.bar(
         ram_analysis,
         x="ram_gb",
-        y="average_price",
+        y="average_price_vnd",
         title="Giá trung bình theo RAM",
         labels={
             "ram_gb": "RAM (GB)",
-            "average_price": "Giá trung bình",
+            "average_price_vnd": "Giá trung bình (VND)"
         },
-    )
-
-    fig_ram.update_layout(
-        template="plotly_white",
+        text_auto=".3s",
+        template="plotly_white"
     )
 
     st.plotly_chart(
         fig_ram,
-        use_container_width=True,
+        use_container_width=True
     )
 
 with col2:
-
-    storage_analysis = (
-        filtered_df
-        .groupby("storage_gb", as_index=False)
-        .agg(
-            average_price=("resale_price", "mean"),
-            phone_count=("resale_price", "count"),
-        )
-        .sort_values("storage_gb")
-    )
 
     fig_storage = px.bar(
         storage_analysis,
         x="storage_gb",
-        y="average_price",
-        title="Giá trung bình theo bộ nhớ",
+        y="average_price_vnd",
+        title="Giá trung bình theo dung lượng bộ nhớ",
         labels={
-            "storage_gb": "Bộ nhớ trong (GB)",
-            "average_price": "Giá trung bình",
+            "storage_gb": "Bộ nhớ (GB)",
+            "average_price_vnd": "Giá trung bình (VND)"
         },
-    )
-
-    fig_storage.update_layout(
-        template="plotly_white",
+        text_auto=".3s",
+        template="plotly_white"
     )
 
     st.plotly_chart(
         fig_storage,
-        use_container_width=True,
+        use_container_width=True
     )
 
 
 # =====================================================
-# 13. PHÂN TÍCH SỨC KHỎE PIN
+# 15. PIN VA GIA BAN LAI
 # =====================================================
 
-st.divider()
+st.markdown(
+    '<div class="section-title">🔋 Phân tích sức khỏe pin</div>',
+    unsafe_allow_html=True
+)
 
-st.subheader("🔋 Phân tích sức khỏe pin")
+battery_df = display_df.dropna(
+    subset=["battery_health", "resale_price_vnd"]
+)
 
-battery_df = filtered_df[
-    [
-        "battery_health",
-        "resale_price",
-        "brand",
-    ]
-].dropna()
-
-if len(battery_df) > 5000:
+if not battery_df.empty:
 
     battery_df = battery_df.sample(
-        n=5000,
-        random_state=42,
+        n=min(5000, len(battery_df)),
+        random_state=42
     )
 
-fig_battery = px.scatter(
-    battery_df,
-    x="battery_health",
-    y="resale_price",
-    color="brand",
-    title="Sức khỏe pin và giá bán lại",
-    labels={
-        "battery_health": "Sức khỏe pin (%)",
-        "resale_price": "Giá bán lại",
-        "brand": "Thương hiệu",
-    },
-)
-
-fig_battery.update_layout(
-    template="plotly_white",
-)
-
-st.plotly_chart(
-    fig_battery,
-    use_container_width=True,
-)
-
-
-# =====================================================
-# 14. THỐNG KÊ CHẤT LƯỢNG DATASET
-# =====================================================
-
-st.divider()
-
-st.subheader("🧪 Chất lượng dữ liệu")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric(
-        "Tổng bản ghi ban đầu",
-        f"{total_rows:,}",
+    fig_battery = px.scatter(
+        battery_df,
+        x="battery_health",
+        y="resale_price_vnd",
+        color="condition",
+        title="Sức khỏe pin và giá bán lại",
+        labels={
+            "battery_health": "Sức khỏe pin (%)",
+            "resale_price_vnd": "Giá bán lại (VND)",
+            "condition": "Tình trạng"
+        },
+        opacity=0.6,
+        template="plotly_white"
     )
 
-with col2:
-    st.metric(
-        "Giá trị thiếu ban đầu",
-        f"{missing_count:,}",
-    )
-
-with col3:
-    st.metric(
-        "Dòng trùng lặp ban đầu",
-        f"{duplicate_count:,}",
+    st.plotly_chart(
+        fig_battery,
+        use_container_width=True
     )
 
 
 # =====================================================
-# 15. BẢNG DỮ LIỆU
+# 16. DIEM CPU VA CAMERA
 # =====================================================
 
-st.divider()
-
-st.subheader("📋 Dữ liệu sau khi lọc")
-
-st.dataframe(
-    filtered_df.head(1000),
-    use_container_width=True,
-    hide_index=True,
+st.markdown(
+    '<div class="section-title">⚙️ Phân tích điểm CPU và Camera</div>',
+    unsafe_allow_html=True
 )
 
 st.caption(
-    "Bảng hiển thị tối đa 1.000 dòng đầu tiên. "
-    "Bạn có thể xuất toàn bộ dữ liệu đã lọc bên dưới."
+    "Điểm CPU và Camera trong dataset nằm trong khoảng 40–100. "
+    "Đây là thang điểm được sử dụng trong bộ dữ liệu, "
+    "không phải chuẩn benchmark chính thức của các hãng."
+)
+
+cpu_camera_col1, cpu_camera_col2 = st.columns(2)
+
+with cpu_camera_col1:
+
+    cpu_df = display_df.dropna(
+        subset=["processor_score"]
+    )
+
+    if not cpu_df.empty:
+
+        fig_cpu = px.histogram(
+            cpu_df,
+            x="processor_score",
+            nbins=30,
+            title="Phân phối điểm CPU",
+            labels={
+                "processor_score": "Điểm CPU",
+                "count": "Số lượng"
+            },
+            template="plotly_white"
+        )
+
+        st.plotly_chart(
+            fig_cpu,
+            use_container_width=True
+        )
+
+with cpu_camera_col2:
+
+    camera_df = display_df.dropna(
+        subset=["camera_score"]
+    )
+
+    if not camera_df.empty:
+
+        fig_camera = px.histogram(
+            camera_df,
+            x="camera_score",
+            nbins=30,
+            title="Phân phối điểm Camera",
+            labels={
+                "camera_score": "Điểm Camera",
+                "count": "Số lượng"
+            },
+            template="plotly_white"
+        )
+
+        st.plotly_chart(
+            fig_camera,
+            use_container_width=True
+        )
+
+
+# =====================================================
+# 17. DIEM CPU VA GIA BAN LAI
+# =====================================================
+
+st.markdown(
+    "#### Mối quan hệ giữa điểm CPU và giá bán lại"
+)
+
+cpu_price_df = display_df.dropna(
+    subset=[
+        "processor_score",
+        "resale_price_vnd",
+        "camera_score"
+    ]
+)
+
+if not cpu_price_df.empty:
+
+    cpu_price_df = cpu_price_df.sample(
+        n=min(5000, len(cpu_price_df)),
+        random_state=42
+    )
+
+    fig_cpu_price = px.scatter(
+        cpu_price_df,
+        x="processor_score",
+        y="resale_price_vnd",
+        color="camera_score",
+        title="Điểm CPU và giá bán lại",
+        labels={
+            "processor_score": "Điểm CPU",
+            "resale_price_vnd": "Giá bán lại (VND)",
+            "camera_score": "Điểm Camera"
+        },
+        opacity=0.65,
+        template="plotly_white"
+    )
+
+    st.plotly_chart(
+        fig_cpu_price,
+        use_container_width=True
+    )
+
+
+# =====================================================
+# 18. PHAN TICH KHU VUC
+# =====================================================
+
+st.markdown(
+    '<div class="section-title">🌍 Phân tích theo khu vực</div>',
+    unsafe_allow_html=True
+)
+
+city_analysis = (
+    display_df
+    .dropna(subset=["city_tier"])
+    .groupby("city_tier", as_index=False)
+    .agg(
+        average_price_vnd=("resale_price_vnd", "mean"),
+        median_price_vnd=("resale_price_vnd", "median"),
+        phone_count=("resale_price_vnd", "count")
+    )
+    .sort_values("city_tier")
+)
+
+if not city_analysis.empty:
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        fig_city_count = px.bar(
+            city_analysis,
+            x="city_tier",
+            y="phone_count",
+            title="Số lượng điện thoại theo khu vực",
+            labels={
+                "city_tier": "Phân loại khu vực",
+                "phone_count": "Số lượng điện thoại"
+            },
+            text_auto=True,
+            template="plotly_white"
+        )
+
+        st.plotly_chart(
+            fig_city_count,
+            use_container_width=True
+        )
+
+    with col2:
+
+        fig_city_price = px.bar(
+            city_analysis,
+            x="city_tier",
+            y="average_price_vnd",
+            title="Giá bán lại trung bình theo khu vực",
+            labels={
+                "city_tier": "Phân loại khu vực",
+                "average_price_vnd": "Giá trung bình (VND)"
+            },
+            text_auto=".3s",
+            template="plotly_white"
+        )
+
+        st.plotly_chart(
+            fig_city_price,
+            use_container_width=True
+        )
+
+    city_table = city_analysis.copy()
+
+    city_table["Giá trung bình (VND)"] = (
+        city_table["average_price_vnd"].apply(format_vnd)
+    )
+
+    city_table["Giá trung vị (VND)"] = (
+        city_table["median_price_vnd"].apply(format_vnd)
+    )
+
+    city_table = city_table[
+        [
+            "city_tier",
+            "Giá trung bình (VND)",
+            "Giá trung vị (VND)",
+            "phone_count"
+        ]
+    ].rename(
+        columns={
+            "city_tier": "Phân loại khu vực",
+            "phone_count": "Số lượng điện thoại"
+        }
+    )
+
+    st.dataframe(
+        city_table,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# =====================================================
+# 19. CHAT LUONG DU LIEU
+# =====================================================
+
+st.markdown(
+    '<div class="section-title">🧹 Kiểm tra chất lượng dữ liệu</div>',
+    unsafe_allow_html=True
+)
+
+quality_col1, quality_col2, quality_col3 = st.columns(3)
+
+quality_col1.metric(
+    "Tổng số dòng ban đầu",
+    f"{total_rows:,}"
+)
+
+quality_col2.metric(
+    "Tổng giá trị bị thiếu",
+    f"{missing_count:,}"
+)
+
+quality_col3.metric(
+    "Số dòng trùng lặp",
+    f"{duplicate_count:,}"
+)
+
+st.markdown("#### Số lượng giá trị bị thiếu theo thuộc tính")
+
+missing_by_column = (
+    df.isna()
+    .sum()
+    .reset_index()
+)
+
+missing_by_column.columns = [
+    "column",
+    "missing_count"
+]
+
+missing_by_column = missing_by_column[
+    missing_by_column["missing_count"] > 0
+].sort_values(
+    "missing_count",
+    ascending=False
+)
+
+if not missing_by_column.empty:
+
+    fig_missing = px.bar(
+        missing_by_column,
+        x="column",
+        y="missing_count",
+        title="Giá trị bị thiếu theo từng thuộc tính",
+        labels={
+            "column": "Thuộc tính",
+            "missing_count": "Số giá trị bị thiếu"
+        },
+        template="plotly_white"
+    )
+
+    st.plotly_chart(
+        fig_missing,
+        use_container_width=True
+    )
+
+else:
+
+    st.success("Dataset không có giá trị bị thiếu.")
+
+
+# =====================================================
+# 20. BANG DU LIEU
+# =====================================================
+
+st.markdown(
+    '<div class="section-title">📋 Dữ liệu sau khi lọc</div>',
+    unsafe_allow_html=True
+)
+
+st.caption(
+    "Hiển thị tối đa 1.000 dòng đầu tiên. "
+    "Các cột giá được quy đổi sang VND."
+)
+
+table_df = display_df.head(1000).copy()
+
+# Đổi tên cột gốc để tránh nhầm với VND.
+table_df = table_df.rename(
+    columns={
+        "original_price": "original_price_dataset_unit",
+        "resale_price": "resale_price_dataset_unit",
+        "original_price_vnd": "original_price_vnd",
+        "resale_price_vnd": "resale_price_vnd"
+    }
+)
+
+# Đưa các cột giá VND lên gần cột giá gốc.
+price_columns = [
+    "original_price_dataset_unit",
+    "original_price_vnd",
+    "resale_price_dataset_unit",
+    "resale_price_vnd"
+]
+
+existing_price_columns = [
+    column for column in price_columns
+    if column in table_df.columns
+]
+
+other_columns = [
+    column for column in table_df.columns
+    if column not in existing_price_columns
+]
+
+table_df = table_df[
+    other_columns + existing_price_columns
+]
+
+table_df = table_df.rename(
+    columns={
+        "original_price_dataset_unit": "Giá gốc (đơn vị dataset)",
+        "original_price_vnd": "Giá gốc (VND)",
+        "resale_price_dataset_unit": "Giá bán lại (đơn vị dataset)",
+        "resale_price_vnd": "Giá bán lại (VND)"
+    }
+)
+
+st.dataframe(
+    table_df,
+    use_container_width=True,
+    hide_index=True
 )
 
 
 # =====================================================
-# 16. XUẤT CSV
+# 21. TAI XUONG DU LIEU
 # =====================================================
 
-st.divider()
+st.markdown(
+    '<div class="section-title">📥 Xuất dữ liệu</div>',
+    unsafe_allow_html=True
+)
 
-st.subheader("📥 Xuất dữ liệu")
+# CSV gồm cả giá gốc theo dataset và giá đã quy đổi VND.
+csv_df = display_df.copy()
 
-csv_data = filtered_df.to_csv(
-    index=False,
+csv_df = csv_df.rename(
+    columns={
+        "original_price": "original_price_dataset_unit",
+        "resale_price": "resale_price_dataset_unit"
+    }
+)
+
+csv_data = csv_df.to_csv(
+    index=False
 ).encode("utf-8-sig")
 
 st.download_button(
-    label="⬇️ Tải dữ liệu đã lọc (CSV)",
+    label="⬇️ Tải xuống dữ liệu CSV",
     data=csv_data,
-    file_name="phonevalue_filtered_data.csv",
+    file_name="phonevalue_filtered_data_vnd.csv",
     mime="text/csv",
-    use_container_width=True,
+    use_container_width=True
 )
 
 
 # =====================================================
-# 17. THÔNG TIN CUỐI TRANG
+# 22. GHI CHU
 # =====================================================
 
-st.divider()
+st.markdown("---")
 
 st.caption(
-    "PhoneValue AI | Phân tích dữ liệu điện thoại "
-    "và giá bán lại bằng Python, Pandas, Streamlit và Plotly."
+    "PhoneValue AI | Phân tích dữ liệu điện thoại đã qua sử dụng | "
+    "Đơn vị giá hiển thị: VND"
 )
-
