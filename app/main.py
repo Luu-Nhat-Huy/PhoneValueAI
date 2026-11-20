@@ -1,4 +1,3 @@
-﻿
 import json
 import sys
 from pathlib import Path
@@ -13,7 +12,7 @@ import streamlit as st
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 APP_DIR = Path(__file__).resolve().parent
-PAGES_DIR = APP_DIR / "pages"
+PAGES_DIR = APP_DIR / "phone_pages"
 MODEL_DIR = ROOT_DIR / "models"
 
 METADATA_PATH = MODEL_DIR / "model_metadata.json"
